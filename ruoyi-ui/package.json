@@ -1,0 +1,32 @@
+{
+  "name": "datamove-ui",
+  "version": "4.8.1",
+  "description": "DataMove 轻量 MySQL 数据同步工具 - 前端(RuoYi-Vue 风格)",
+  "author": "ruoyi",
+  "private": true,
+  "scripts": {
+    "dev": "vue-cli-service serve",
+    "build": "vue-cli-service build",
+    "build:prod": "vue-cli-service build --mode production"
+  },
+  "dependencies": {
+    "axios": "^0.27.2",
+    "codemirror": "^5.65.16",
+    "core-js": "^3.32.0",
+    "element-ui": "2.13.2",
+    "js-cookie": "3.0.5",
+    "nprogress": "0.2.0",
+    "vue": "2.7.16",
+    "vue-router": "3.6.5",
+    "vuex": "3.6.2",
+    "xlsx": "^0.18.5"
+  },
+  "devDependencies": {
+    "@vue/cli-plugin-router": "~5.0.0",
+    "@vue/cli-plugin-vuex": "~5.0.0",
+    "@vue/cli-service": "~5.0.0",
+    "sass": "1.32.13",
+    "sass-loader": "12.0.0",
+    "vue-template-compiler": "2.7.16"
+  }
+}

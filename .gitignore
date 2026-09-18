@@ -1,0 +1,65 @@
+# ---------- Maven / 编译产物 ----------
+HELP.md
+target/
+.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### NetBeans ###
+/nbproject/private/
+/nbbuild/
+/dist/
+/nbdist/
+/.nb-gradle/
+build/
+!**/src/main/**/build/
+!**/src/test/**/build/
+
+### VS Code ###
+.vscode/
+
+# ---------- datamove 专属 ----------
+# 前端依赖(必须忽略, 191M)
+node_modules/
+**/node_modules/
+ruoyi-ui/node_modules/
+
+# 日志与临时文件
+**/*.log
+*.log
+*.tmp
+*.bak
+*.swp
+.DS_Store
+Thumbs.db
+
+# 顶层奇怪的编译产物
+Bcrypt.class
+*.class
+
+# ---------- 敏感配置(本地真配置, 不入仓) ----------
+# 真配置应复制 .example 后填值, 本文件 gitignore 兜底
+src/main/resources/application-local.yml
+.env
+.env.local
+.env.*.local
+
+# IDE 历史
+.idea/workspace.xml
+.idea/tasks.xml
+.vscode/.browse.VC-db*

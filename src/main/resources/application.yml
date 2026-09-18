@@ -1,0 +1,90 @@
+server:
+  port: 8080
+  servlet:
+    context-path: /
+
+spring:
+  application:
+    name: datamove
+  profiles:
+    active: dev
+  jackson:
+    date-format: yyyy-MM-dd HH:mm:ss
+    time-zone: GMT+8
+  servlet:
+    multipart:
+      max-file-size: 50MB
+      max-request-size: 100MB
+  data:
+    redis:
+      host: 127.0.0.1
+      port: 6379
+      # Redis 密码 (通过环境变量 REDIS_PASSWORD 注入, 参考 application-local.yml)
+      password: ${REDIS_PASSWORD:}
+      database: 0
+      timeout: 10s
+
+# MyBatis-Plus
+mybatis-plus:
+  mapper-locations: classpath*:mapper/**/*Mapper.xml
+  type-aliases-package: com.ruoyi.datamove.**.domain
+  configuration:
+    map-underscore-to-camel-case: true
+    cache-enabled: false
+    log-impl: org.apache.ibatis.logging.nologging.NoLoggingImpl
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: '1'
+      logic-not-delete-value: '0'
+
+# Token 配置
+token:
+  # 令牌自定义标识
+  header: Authorization
+  # 令牌密钥 (通过环境变量 JWT_SECRET 注入真实值, 长度建议 ≥ 32 字节)
+  # 本地真实配置见 application-local.yml
+  secret: ${JWT_SECRET:CHANGE_ME_PLEASE_MIN_32_BYTES_SECRET}
+  # 令牌有效期(默认30分钟)
+  expireTime: 1800
+  # 是否为记住账号
+  isRememberMe: false
+
+# 同步工具配置
+sync:
+  # 默认批次大小
+  default-batch-size: 1000
+  # AES加密密钥(16位, 通过环境变量 SYNC_AES_KEY 注入真实值)
+  aes-key: ${SYNC_AES_KEY:CHANGE_ME_16_BYTES_KEY}
+  # 钉钉告警开启
+  dingtalk-enabled: true
+  # License 服务地址
+  license-server: https://license.datamove.com/check
+  # LicenseKey(通过环境变量 SYNC_LICENSE_KEY 注入真实授权码)
+  license-key: ${SYNC_LICENSE_KEY:CHANGE_ME_LICENSE_KEY}
+  # 内部通信密钥 (通过环境变量 INNER_SECRET 注入真实值)
+  inner-secret: ${INNER_SECRET:CHANGE_ME_INNER_SECRET}
+
+# 防止 XSS 存储
+xss:
+  enabled: true
+  excludes:
+    - /system/notice/*
+
+# 日志配置
+logging:
+  level:
+    com.ruoyi: info
+    com.alibaba.otter.canal: warn
+
+# ----------------------------------------------------------------------------
+# ⚠️ 重要安全提示
+# ----------------------------------------------------------------------------
+# 1. 本文件是脱敏后的"模板",已替换所有密钥为占位符 ${XXX:default}
+# 2. 真实配置请复制 application-local.yml.example 为 application-local.yml 后填入真值
+#    (application-local.yml 已被 .gitignore 排除, 不会进入版本历史)
+# 3. 真实部署建议直接通过环境变量 / --spring 启动参数 / 配置中心注入密钥,
+#    不要把真实密钥硬编码到任何配置文件中
+# 4. 任何历史 commit 中如已包含真实密钥, 视为已泄露, 请立即轮换所有密钥
+# ----------------------------------------------------------------------------

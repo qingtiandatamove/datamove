@@ -1,0 +1,5 @@
+# Canal 运行时产物(位点/日志), 不入库
+logs/
+conf/example/h2.mv.db
+conf/example/h2.mv.db.trace.db
+conf/example/meta.dat

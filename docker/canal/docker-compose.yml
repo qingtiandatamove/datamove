@@ -1,0 +1,19 @@
+# 数据同步平台 - Canal 增量同步服务
+# 启动: cd docker/canal && docker compose up -d
+# 查看日志: docker compose logs -f canal
+# 停止: docker compose down
+services:
+  canal:
+    image: canal/canal-server:v1.1.8
+    container_name: datamove-canal
+    hostname: canal
+    restart: unless-stopped
+    ports:
+      - "11111:11111"   # Canal TCP 端口 -> 任务表单里的 "Canal Port"
+      - "11112:11112"   # metrics 监控端口
+      - "11110:11110"   # admin 管理端口
+    volumes:
+      # instance 配置 + h2 位点文件(断点续传靠它, 必须持久化)
+      - ./conf/example:/home/admin/canal-server/conf/example
+      - ./conf/canal.properties:/home/admin/canal-server/conf/canal.properties
+      - ./logs:/home/admin/canal-server/logs
