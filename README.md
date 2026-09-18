@@ -146,9 +146,6 @@ npm run dev
 
 ## 七、数据库初始化值
 
-启动时:
-1. 自动注册 30 天试用 License,绑定本机 MAC
-2. 自动加载 6 个菜单(数据源/任务/日志/授权/用户)
 
 第一次登录后请立即:
 1. 修改默认密码
@@ -163,10 +160,6 @@ npm run dev
 -- 1. 源库开启 binlog ROW 模式
 SET GLOBAL binlog_format = 'ROW';
 
--- 2. 授权 Canal 同步账号
-CREATE USER canal_user IDENTIFIED BY 'canal_pass';
-GRANT SELECT, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'canal_user'@'%';
-FLUSH PRIVILEGES;
 
 -- 3. Canal Server 部署参考官方文档
 --    下载地址: https://github.com/alibaba/canal/releases
