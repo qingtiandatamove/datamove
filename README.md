@@ -296,7 +296,7 @@ SET GLOBAL binlog_format = 'ROW';
 
 ---
 
-## 十二、界面截图
+## 十二、效果图
 
 ![输入图片说明](image/screenshot-1.png)
 
