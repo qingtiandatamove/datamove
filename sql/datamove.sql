@@ -127,6 +127,7 @@ CREATE TABLE `sync_task` (
   `batch_size`      int(11)       NOT NULL DEFAULT 1000 COMMENT '批次大小',
   `overwrite_flag`  tinyint(1)    NOT NULL DEFAULT 0 COMMENT '是否覆盖数据(1=启动时清空目标表再全量同步,仅FULL任务)',
   `dingtalk_webhook` varchar(500) DEFAULT NULL COMMENT '钉钉告警Webhook',
+  `alert_email`     varchar(500)  DEFAULT NULL COMMENT '告警邮箱,多个用英文逗号分隔',
   `status`          varchar(20)   NOT NULL DEFAULT 'STOP' COMMENT '任务状态(STOP/RUNNING/PAUSE/COMPLETED/FAILED)',
   `canal_host`      varchar(100)  DEFAULT NULL COMMENT 'Canal服务器地址(INCR模式)',
   `canal_port`      int(11)       DEFAULT 11111 COMMENT 'Canal端口(INCR模式)',

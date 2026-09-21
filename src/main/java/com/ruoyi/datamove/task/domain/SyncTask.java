@@ -55,6 +55,9 @@ public class SyncTask extends BaseEntity implements Serializable {
 
     private String dingtalkWebhook;
 
+    /** 告警邮箱, 多个用英文逗号分隔; 为空则不发送邮件告警 */
+    private String alertEmail;
+
     /** STOP/RUNNING/PAUSE/COMPLETED/FAILED */
     private String status;
 

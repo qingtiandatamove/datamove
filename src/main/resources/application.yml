@@ -7,7 +7,12 @@ spring:
   application:
     name: datamove
   profiles:
-    active: dev
+    # 默认激活 dev + local:
+    #   dev   → 脱敏模板配置(application-dev.yml)
+    #   local → 本地真实配置(application-local.yml, 已被 .gitignore 排除)
+    # local 文件不存在时 Spring Boot 会静默忽略, 不影响生产/CI
+    # 生产环境可用环境变量覆盖: SPRING_PROFILES_ACTIVE=prod
+    active: ${SPRING_PROFILES_ACTIVE:dev,local}
   jackson:
     date-format: yyyy-MM-dd HH:mm:ss
     time-zone: GMT+8
@@ -59,6 +64,24 @@ sync:
   aes-key: ${SYNC_AES_KEY:CHANGE_ME_16_BYTES_KEY}
   # 钉钉告警开启
   dingtalk-enabled: true
+  # ---- 邮件告警 (任务级配置收件人, 全局配置SMTP服务器) ----
+  mail:
+    # 总开关: 关闭时所有邮件告警静默跳过
+    enabled: ${MAIL_ENABLED:false}
+    # SMTP 服务器
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:465}
+    # smtps(SSL, 常用465) / smtp(普通或STARTTLS, 常用25/587)
+    protocol: ${MAIL_PROTOCOL:smtps}
+    # 发件账号(通常是邮箱地址)
+    username: ${MAIL_USERNAME:}
+    # 邮箱授权码, 不是登录密码
+    password: ${MAIL_PASSWORD:}
+    # 发件人显示地址, 留空则使用 username
+    from: ${MAIL_FROM:}
+    ssl: ${MAIL_SSL:true}
+    starttls: ${MAIL_STARTTLS:false}
+    timeout: 8000
   # License 服务地址
   license-server: https://license.datamove.com/check
   # LicenseKey(通过环境变量 SYNC_LICENSE_KEY 注入真实授权码)

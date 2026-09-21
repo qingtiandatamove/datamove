@@ -5,7 +5,7 @@ import com.alibaba.otter.canal.client.CanalConnectors;
 import com.alibaba.otter.canal.protocol.CanalEntry;
 import com.alibaba.otter.canal.protocol.Message;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.ruoyi.common.utils.DingTalkUtils;
+import com.ruoyi.datamove.util.AlertUtils;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.engine.SyncContext;
@@ -355,13 +355,13 @@ public class CanalSyncEngine {
                                 pg == null || pg.getTotalRows() == null ? 0L : pg.getTotalRows(),
                                 System.currentTimeMillis() - batchStartMs,
                                 SyncType.LOG_FAILED, e.getMessage());
-                        DingTalkUtils.sendText(task.getDingtalkWebhook(),
+                        AlertUtils.alert(task, "增量批次异常",
                                 "【DataMove告警】增量任务[" + task.getTaskName() + "]异常:\n" + e.getMessage());
                     }
                 }
             } catch (Exception e) {
                 log.error("[IncrSync] canal worker fatal", e);
-                DingTalkUtils.sendText(task.getDingtalkWebhook(),
+                AlertUtils.alert(task, "增量连接异常",
                         "【DataMove告警】增量任务[" + task.getTaskName() + "]连接异常:\n" + e.getMessage());
 
                 SyncTaskProgress p = progressMapper.selectOne(

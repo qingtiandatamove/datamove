@@ -1,7 +1,7 @@
 package com.ruoyi.datamove.engine.full;
 
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
-import com.ruoyi.common.utils.DingTalkUtils;
+import com.ruoyi.datamove.util.AlertUtils;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.engine.SyncContext;
@@ -72,14 +72,14 @@ public class FullSyncEngine {
         SyncDatasource tgt = datasourceMapper.selectById(task.getTargetId());
         if (src == null || tgt == null) throw new RuntimeException("任务关联的数据源不存在");
 
-        // 连通性测试 - 触发钉钉告警
+        // 连通性测试 - 触发告警(钉钉+邮件)
         if (!JdbcUtils.testConnection(src)) {
-            DingTalkUtils.sendText(task.getDingtalkWebhook(),
+            AlertUtils.alert(task, "启动失败:源库连接失败",
                     "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:源库连接失败");
             throw new RuntimeException("无法连接源数据库");
         }
         if (!JdbcUtils.testConnection(tgt)) {
-            DingTalkUtils.sendText(task.getDingtalkWebhook(),
+            AlertUtils.alert(task, "启动失败:目标库连接失败",
                     "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:目标库连接失败");
             throw new RuntimeException("无法连接目标数据库");
         }
@@ -218,7 +218,7 @@ public class FullSyncEngine {
             }
         } catch (Throwable t) {
             log.error("[Sync] task[{}] sync error", task.getTaskName(), t);
-            DingTalkUtils.sendText(task.getDingtalkWebhook(),
+            AlertUtils.alert(task, "同步异常",
                     "【DataMove告警】任务[" + task.getTaskName() + "]同步异常:\n" + t.getMessage());
             logService.writeLog(ctx, -1, null, null, 0, progress.getTotalRows(),
                     0L, SyncType.LOG_FAILED, t.getMessage());

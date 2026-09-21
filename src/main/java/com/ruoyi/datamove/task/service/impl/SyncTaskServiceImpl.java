@@ -114,6 +114,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setBatchSize(t.getBatchSize());
         db.setOverwriteFlag(t.getOverwriteFlag() == null ? 0 : t.getOverwriteFlag());
         db.setDingtalkWebhook(t.getDingtalkWebhook());
+        db.setAlertEmail(t.getAlertEmail());
         db.setCanalHost(t.getCanalHost());
         db.setCanalPort(t.getCanalPort());
         db.setCanalDestination(t.getCanalDestination());

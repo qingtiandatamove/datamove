@@ -182,6 +182,12 @@
         </template>
 
         <el-form-item label="钉钉告警"><el-input v-model="form.dingtalkWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx" /></el-form-item>
+        <el-form-item label="邮件告警">
+          <el-input v-model="form.alertEmail" placeholder="多个邮箱用英文逗号分隔, 如 ops@a.com,dev@b.com" />
+          <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+            留空则不发送邮件; 需服务端配置 SMTP 服务器并开启 sync.mail.enabled=true 后生效
+          </div>
+        </el-form-item>
         <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
       </el-form>
       <div slot="footer">

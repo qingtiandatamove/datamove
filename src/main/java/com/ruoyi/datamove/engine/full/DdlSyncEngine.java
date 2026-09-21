@@ -1,6 +1,6 @@
 package com.ruoyi.datamove.engine.full;
 
-import com.ruoyi.common.utils.DingTalkUtils;
+import com.ruoyi.datamove.util.AlertUtils;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.engine.consts.SyncType;
@@ -59,12 +59,12 @@ public class DdlSyncEngine {
         if (src == null || tgt == null) throw new RuntimeException("任务关联的数据源不存在");
 
         if (!JdbcUtils.testConnection(src)) {
-            DingTalkUtils.sendText(task.getDingtalkWebhook(),
+            AlertUtils.alert(task, "启动失败:源库连接失败",
                     "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:源库连接失败");
             throw new RuntimeException("无法连接源数据库");
         }
         if (!JdbcUtils.testConnection(tgt)) {
-            DingTalkUtils.sendText(task.getDingtalkWebhook(),
+            AlertUtils.alert(task, "启动失败:目标库连接失败",
                     "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:目标库连接失败");
             throw new RuntimeException("无法连接目标数据库");
         }
@@ -85,7 +85,7 @@ public class DdlSyncEngine {
             upsertProgress(task);
         } catch (Throwable t) {
             log.error("[DDL] task[{}] sync error", task.getTaskName(), t);
-            DingTalkUtils.sendText(task.getDingtalkWebhook(),
+            AlertUtils.alert(task, "表结构同步失败",
                     "【DataMove告警】表结构同步任务[" + task.getTaskName() + "]失败:\n" + t.getMessage());
             task.setStatus(SyncType.STATUS_FAILED);
             taskMapper.updateById(task);
