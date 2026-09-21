@@ -88,20 +88,21 @@
             还没有数据源, <a href="javascript:;" @click="$router.push('/sync/datasource')">立即添加</a>
           </div>
           <el-table v-else :data="datasources.slice(0, 6)" size="small" border>
-            <el-table-column label="名称" prop="name" min-width="120" show-overflow-tooltip />
-            <el-table-column label="类型" width="120">
-              <template slot-scope="{ row }">
-                <el-tag size="mini" :type="tagForDb(row.dbType)">{{ row.dbType || '—' }}</el-tag>
+            <!-- 修复: 实体字段是 datasourceName, 之前 prop="name" 一直取到 undefined -->
+            <el-table-column label="名称" prop="datasourceName" min-width="120" show-overflow-tooltip />
+            <!-- 类型: 当前工具仅支持 MySQL→MySQL 同步, 写死展示, 后续如接入多库可换回 row.dbType -->
+            <el-table-column label="类型" width="100" align="center">
+              <template slot-scope>
+                <el-tag size="mini">MySQL</el-tag>
               </template>
             </el-table-column>
             <el-table-column label="主机:端口" min-width="160" show-overflow-tooltip>
               <template slot-scope="{ row }">{{ row.host }}:{{ row.port }}</template>
             </el-table-column>
+            <!-- 状态: sync_datasource 表暂无 enabled 字段, 全部视为启用 -->
             <el-table-column label="状态" width="80" align="center">
-              <template slot-scope="{ row }">
-                <el-tag size="mini" :type="row.enabled === false ? 'info' : 'success'">
-                  {{ row.enabled === false ? '停用' : '启用' }}
-                </el-tag>
+              <template slot-scope>
+                <el-tag size="mini" type="success">启用</el-tag>
               </template>
             </el-table-column>
           </el-table>
