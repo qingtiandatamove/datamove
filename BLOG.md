@@ -323,7 +323,7 @@ docker compose -f docker/canal/docker-compose.yml up -d
 
 > ⚠️ 源库与目标库是**同一个 MySQL 实例**，读和写在同一个 buffer pool 里循环。所以这是一组"单机上限"数据，真实跨机同步还要再扣掉网络 RTT 和带宽开销。
 
-### 14.2 两次用例的对比
+### 14.2 两次用例的对比与总耗时
 
 两次都是 `overwrite_flag=1` 的覆盖式全量：先 `TRUNCATE` 目标表、清空断点，再从 `id > 0` 重新拉一遍全表。
 
@@ -338,6 +338,8 @@ docker compose -f docker/canal/docker-compose.yml up -d
 | 单批平均耗时（满批） | 1.80 s | 18.55 s |
 | 单行耗时 | 0.180 ms | 0.186 ms |
 | 失败批次 | 0 | 0 |
+
+> **两次运行合计**：25 个批次、1,200,046 行，同步总耗时 **222.1 s（约 3 分 42 秒）**，加权平均吞吐 **5,402 行/秒**，单行耗时 0.185 ms。
 
 **用例 A 批次明细（`batch_size=10,000`）**
 
