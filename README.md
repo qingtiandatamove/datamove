@@ -304,4 +304,12 @@ SET GLOBAL binlog_format = 'ROW';
 
 ![输入图片说明](image/sync-log.png)
 
+## 十三、压测效果图
+
+![压测数据源](image/压测.png)
+
+![10 万行同步日志](image/压测10万.png)
+
+![100 万行同步日志](image/压测100万.png)
+
 
