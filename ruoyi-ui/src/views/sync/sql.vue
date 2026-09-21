@@ -6,14 +6,28 @@
         <span class="head-tip">支持查询 / 增删改 / 建表改表, 多语句以分号分隔, Ctrl+Enter 执行选中或全部, Ctrl+空格 补全</span>
       </div>
 
-      <!-- 数据源选择 -->
-      <el-form :inline="true">
+      <!-- 数据源选择 + 操作按钮 -->
+      <el-form :inline="true" class="sql-toolbar">
         <el-form-item label="数据源">
           <el-select v-model="dsId" size="small" filterable style="width:300px" placeholder="选择数据源"
             @change="onDsChange">
             <el-option v-for="d in datasources" :key="d.id" :value="d.id"
               :label="d.datasourceName + ' (' + d.host + '/' + d.dbName + ')'" />
           </el-select>
+        </el-form-item>
+        <el-form-item class="toolbar-btns">
+          <el-button size="small" type="primary" icon="el-icon-video-play"
+            :disabled="!dsId || !runnable || running" :loading="running" @click="onRun">
+            执行 (Ctrl+Enter)
+          </el-button>
+          <el-button size="small" icon="el-icon-delete" @click="onClear">清空</el-button>
+          <el-button size="small" :type="schemaPanelVisible ? 'primary' : ''" icon="el-icon-files"
+            :disabled="!dsId" @click="toggleSchemaPanel">表结构</el-button>
+          <el-button size="small" icon="el-icon-star-off" :disabled="!dsId || !runnable"
+            @click="openSaveFavorite">收藏</el-button>
+          <el-button size="small" icon="el-icon-search"
+            :disabled="!dsId || !runnable || !canExplain || explainRunning"
+            :loading="explainRunning" @click="onExplain">EXPLAIN</el-button>
         </el-form-item>
       </el-form>
 
@@ -22,20 +36,6 @@
         <div ref="editor" class="sql-editor"></div>
         <div class="editor-bar">
           <span class="bar-hint">{{ selHint }}</span>
-          <div>
-            <el-button size="small" icon="el-icon-delete" @click="onClear">清空</el-button>
-            <el-button size="small" :type="schemaPanelVisible ? 'primary' : ''" icon="el-icon-files"
-              :disabled="!dsId" @click="toggleSchemaPanel">📋 表结构</el-button>
-            <el-button size="small" icon="el-icon-star-off" :disabled="!dsId || !runnable"
-              @click="openSaveFavorite">★ 收藏</el-button>
-            <el-button size="small" icon="el-icon-search"
-              :disabled="!dsId || !runnable || !canExplain || explainRunning"
-              :loading="explainRunning" @click="onExplain">EXPLAIN</el-button>
-            <el-button size="small" type="primary" icon="el-icon-video-play"
-              :disabled="!dsId || !runnable || running" :loading="running" @click="onRun">
-              执行 (Ctrl+Enter)
-            </el-button>
-          </div>
         </div>
       </div>
 
@@ -326,7 +326,10 @@ export default {
       return '未选中时执行全部语句'
     },
     currentUserName () {
-      try { return (this.$store && this.$store.state && this.$store.state.user && this.$store.state.user.name) || '' } catch (e) { return '' }
+      try {
+        const u = (this.$store && this.$store.state && this.$store.state.user) || {}
+        return u.userName || u.name || ''
+      } catch (e) { return '' }
     }
   },
   mounted () {
@@ -473,7 +476,7 @@ export default {
       pageSqlFavorite({ keyword: this.favoriteKeyword, dsId: this.dsId, pageNum: 1, pageSize: 100 })
         .then(r => {
           const d = r.data || {}
-          this.favoriteList = d.records || []
+          this.favoriteList = d.rows || []
         })
         .catch(() => { this.favoriteList = [] })
         .finally(() => { this.favoriteLoading = false })
@@ -742,8 +745,12 @@ export default {
 .sql-editor /deep/ .CodeMirror-focused .CodeMirror-selected {
   background: #3d6d99;
 }
+/* 数据源 + 操作按钮 同一行 */
+.sql-toolbar { margin-bottom: 12px }
+.sql-toolbar .el-form-item { margin-bottom: 0 }
+.sql-toolbar .toolbar-btns { margin-right: 0 }
 .editor-bar {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: flex-end; align-items: center;
   margin-top: 8px;
 }
 .bar-hint { font-size: 12px; color: #909399 }

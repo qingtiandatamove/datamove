@@ -1,5 +1,6 @@
 import Vue from 'vue'
 import VueRouter from 'vue-router'
+import store from '@/store'
 
 Vue.use(VueRouter)
 
@@ -26,11 +27,16 @@ const routes = [
 ]
 
 const router = new VueRouter({ mode: 'hash', routes })
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   document.title = (to.meta?.title ? to.meta.title + ' - ' : '') + 'DataMove 数据同步工具'
   const token = localStorage.getItem('Admin-Token')
   if (to.path === '/login') return next()
   if (!token) return next('/login')
+  // 刷新页面后 Vuex 会被重置, 但有 token 仍是登录态, 用 token 换回用户信息
+  // (SQL 收藏的「编辑/删除」按钮、个人中心都依赖 state.user)
+  if (!store.state.user.userName) {
+    try { await store.dispatch('info') } catch (e) { /* 401 交由 request 拦截器统一处理 */ }
+  }
   next()
 })
 export default router
