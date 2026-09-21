@@ -9,7 +9,7 @@ export function deleteDataSource (id) { return request({ url: `/sync/datasource/
 export function testDataSource (data) { return request({ url: '/sync/datasource/test', method: 'post', data }) }
 export function listTables (id) { return request({ url: `/sync/datasource/${id}/tables`, method: 'get' }) }
 export function listColumns (id, table) { return request({ url: `/sync/datasource/${id}/columns`, method: 'get', params: { table } }) }
-export function getTableSchema (id, table) { return request({ url: `/sync/datasource/${id}/table/${table}/schema`, method: 'get' }) }
+export function getTableSchema (id, table) { return request({ url: `/sync/datasource/${id}/schema`, method: 'get', params: { table } }) }
 
 /* ============ 数据浏览 ============ */
 export function browseData (id, table, params) { return request({ url: `/sync/browse/${id}/table/${table}/data`, method: 'get', params }) }

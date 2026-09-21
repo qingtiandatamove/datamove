@@ -97,11 +97,11 @@ public class SyncDatasourceController {
     }
 
     @ApiOperation("获取完整表结构 (列/索引/元信息/DDL)")
-    @GetMapping("/{id}/table/{table}/schema")
-    public R<Map<String, Object>> tableSchema(@PathVariable Long id, @PathVariable String table) {
+    @GetMapping("/{id}/schema")
+    public R<Map<String, Object>> tableSchema(@PathVariable Long id, @RequestParam String table) {
         SyncDatasource ds = datasourceService.getById(id);
         if (ds == null) return R.fail("数据源不存在");
-        if (table == null || !table.matches("[A-Za-z0-9_]+")) return R.fail("非法表名");
+        if (table == null || table.trim().isEmpty()) return R.fail("表名不能为空");
 
         Map<String, Object> out = new java.util.LinkedHashMap<>();
         out.put("tableName", table);

@@ -570,6 +570,7 @@ export default {
       this.loadSchema(this.schemaActiveTable)
     },
     loadSchema (t) {
+      if (!this.dsId || !t) { this.schemaActive = null; return }
       this.schemaLoading = true
       getTableSchema(this.dsId, t)
         .then(r => {
