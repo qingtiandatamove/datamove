@@ -298,10 +298,10 @@ SET GLOBAL binlog_format = 'ROW';
 
 ## 十二、效果图
 
-![输入图片说明](image/screenshot-1.png)
+![输入图片说明](image/sql-workbench.png)
 
-![输入图片说明](image/screenshot-2.png)
+![输入图片说明](image/sync-task.png)
 
-![输入图片说明](image/screenshot-3.png)
+![输入图片说明](image/sync-log.png)
 
 
