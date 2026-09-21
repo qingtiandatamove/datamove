@@ -111,7 +111,8 @@ public class SyncLogController {
         QueryWrapper<SyncTaskLog> w = new QueryWrapper<>();
         w.select(
                 "DATE_FORMAT(create_time, '%Y-%m-%d') AS d",
-                "IFNULL(SUM(batch_rows), 0) AS rows",
+                // 'rows' 是 MySQL 8.0 保留字 (窗口函数 ROWS BETWEEN ...), 必须用反引号
+                "IFNULL(SUM(batch_rows), 0) AS `rows`",
                 "SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count",
                 "SUM(CASE WHEN status = 'FAILED'  THEN 1 ELSE 0 END) AS failed_count"
         );
