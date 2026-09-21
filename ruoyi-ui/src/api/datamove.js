@@ -65,6 +65,8 @@ export function exportLogUrl (params) {
   const qs = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
   return (process.env.NODE_ENV === 'production' ? '' : '/dev-api') + '/sync/log/export?' + qs
 }
+/* 按天聚合同步日志(首页趋势图) */
+export function logTrend (days) { return request({ url: '/sync/log/trend', method: 'get', params: { days } }) }
 
 /* ============ License ============ */
 export function getLicense () { return request({ url: '/sync/license', method: 'get' }) }

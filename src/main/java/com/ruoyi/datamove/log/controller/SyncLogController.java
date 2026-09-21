@@ -15,7 +15,13 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
 
 @Api(tags = "同步日志")
 @RestController
@@ -88,5 +94,48 @@ public class SyncLogController {
             return "\"" + s.replace("\"", "\"\"") + "\"";
         }
         return s;
+    }
+
+    /**
+     * 按天聚合同步行数 + 成功/失败次数, 用于首页趋势图
+     * 入参: days 取值范围 1-90, 默认 7
+     * 返回: 把没有日志的日期也补 0, 方便前端画连续的折线/柱状
+     */
+    @ApiOperation("按天聚合同步日志(趋势图)")
+    @GetMapping("/trend")
+    public R<List<Map<String, Object>>> trend(@RequestParam(defaultValue = "7") int days) {
+        if (days < 1 || days > 90) days = 7;
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+
+        // 把 MySQL 的 GROUP BY 结果聚成 map, key 为 yyyy-MM-dd
+        QueryWrapper<SyncTaskLog> w = new QueryWrapper<>();
+        w.select(
+                "DATE_FORMAT(create_time, '%Y-%m-%d') AS d",
+                "IFNULL(SUM(batch_rows), 0) AS rows",
+                "SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END) AS success_count",
+                "SUM(CASE WHEN status = 'FAILED'  THEN 1 ELSE 0 END) AS failed_count"
+        );
+        w.ge("create_time", LocalDate.now().minusDays(days - 1).atStartOfDay());
+        w.groupBy("d");
+        w.orderByAsc("d");
+        Map<String, Map<String, Object>> grouped = new TreeMap<>();
+        for (Map<String, Object> row : logMapper.selectMaps(w)) {
+            String d = String.valueOf(row.get("d"));
+            grouped.put(d, row);
+        }
+
+        // 补齐空白日期, 让前端曲线连续
+        List<Map<String, Object>> out = new ArrayList<>(days);
+        for (int i = days - 1; i >= 0; i--) {
+            String d = LocalDate.now().minusDays(i).format(fmt);
+            Map<String, Object> row = grouped.get(d);
+            Map<String, Object> item = new HashMap<>(4);
+            item.put("date", d);
+            item.put("rows",          row == null ? 0 : row.get("rows"));
+            item.put("successCount",  row == null ? 0 : row.get("success_count"));
+            item.put("failedCount",   row == null ? 0 : row.get("failed_count"));
+            out.add(item);
+        }
+        return R.ok(out);
     }
 }

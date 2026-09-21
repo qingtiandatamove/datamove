@@ -13,6 +13,7 @@
     "axios": "^0.27.2",
     "codemirror": "^5.65.16",
     "core-js": "^3.32.0",
+    "echarts": "^5.4.3",
     "element-ui": "2.13.2",
     "js-cookie": "3.0.5",
     "nprogress": "0.2.0",
