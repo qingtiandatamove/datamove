@@ -7,7 +7,12 @@ spring:
   application:
     name: datamove
   profiles:
-    active: dev
+    # 本地默认激活 dev + local:
+    #   dev   → 脱敏模板配置 (application-dev.yml, 提交到 git)
+    #   local → 本地真实配置 (application-local.yml, 已在 .gitignore 排除, 含真实 DB/Redis 密码)
+    # 缺少 application-local.yml 时 Spring Boot 会静默忽略, 不影响 CI/生产
+    # 生产/CI 可用环境变量覆盖: SPRING_PROFILES_ACTIVE=prod
+    active: ${SPRING_PROFILES_ACTIVE:dev,local}
   # ---------- SpringBoot DevTools: 本地热重启 ----------
   # 改 Java 代码保存即生效; 关闭 livereload 避免占用端口
   devtools:
