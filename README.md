@@ -298,10 +298,10 @@ SET GLOBAL binlog_format = 'ROW';
 
 ## 十二、界面截图
 
-![输入图片说明](%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E6%88%AA%E5%9B%BE_6c625e08-f800-4e66-8bde-e04e82bbfb69.png)
+![输入图片说明](image/screenshot-1.png)
 
-![输入图片说明](%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E6%88%AA%E5%9B%BE_ef04aae1-0d38-40cb-b886-7ba37eff66f5.png)
+![输入图片说明](image/screenshot-2.png)
 
-![输入图片说明](%E4%BC%81%E4%B8%9A%E5%BE%AE%E4%BF%A1%E6%88%AA%E5%9B%BE_30e48764-6ad7-48a2-ab46-e6c041363ef7.png)
+![输入图片说明](image/screenshot-3.png)
 
 
