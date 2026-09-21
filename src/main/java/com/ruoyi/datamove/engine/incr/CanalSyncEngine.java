@@ -11,6 +11,8 @@ import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.engine.SyncContext;
 import com.ruoyi.datamove.engine.consts.SyncType;
 import com.ruoyi.datamove.engine.log.SyncLogService;
+import com.ruoyi.datamove.engine.metrics.TaskMetrics;
+import com.ruoyi.datamove.engine.metrics.TaskMetricsRegistry;
 import com.ruoyi.datamove.task.domain.SyncCanalPosition;
 import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
@@ -47,6 +49,7 @@ public class CanalSyncEngine {
     private final SyncDatasourceMapper   datasourceMapper;
     private final SyncCanalPositionMapper positionMapper;
     private final SyncLogService         logService;
+    private final TaskMetricsRegistry    metricsRegistry;
 
     /** 任务 -> worker executor */
     private static final Map<Long, CanalWorker> WORKERS = new ConcurrentHashMap<>();
@@ -84,6 +87,14 @@ public class CanalSyncEngine {
                 new InetSocketAddress(task.getCanalHost(), task.getCanalPort()),
                 task.getCanalDestination(),
                 "", "");
+
+        // 实时指标: 增量任务无固定总量(不展示 ETA),
+        // 瓶颈看「写入目标库耗时 vs 等待 binlog 事件耗时」
+        SyncTaskProgress base = progressMapper.selectOne(
+                new QueryWrapper<SyncTaskProgress>().eq("task_id", taskId));
+        TaskMetrics metrics = metricsRegistry.ensure(taskId, 1000);
+        metrics.setCompareMode(TaskMetrics.MODE_STREAM);
+        metrics.activate(-1L, base == null || base.getSuccessRows() == null ? 0L : base.getSuccessRows());
 
         CanalWorker worker = new CanalWorker(task, connector, src, tgt);
         WORKERS.put(taskId, worker);
@@ -240,13 +251,22 @@ public class CanalSyncEngine {
                 }
 
                 SyncContext ctx = buildCtx(task, src, tgt);
+                TaskMetrics metrics = metricsRegistry.get(task.getId());
                 int batchNo = 0;
                 while (running) {
+                    // 等待并拉取 binlog 批次的耗时
+                    long getStartMs = System.currentTimeMillis();
                     Message message = connector.getWithoutAck(1000);
+                    long getMs = System.currentTimeMillis() - getStartMs;
                     long batchId = message.getId();
                     int size = message.getEntries().size();
                     if (size == 0 || batchId == -1) continue;
                     batchNo++;
+
+                    if (metrics != null) {
+                        metrics.beginBatch(batchNo, size);
+                        metrics.readRows(size);
+                    }
 
                     long batchStartMs = System.currentTimeMillis();
                     CanalEntry.Entry firstEntry = message.getEntries().get(0);
@@ -257,6 +277,7 @@ public class CanalSyncEngine {
                     int inserts = 0, updates = 0, deletes = 0, errs = 0;
                     String firstErr = null;
                     StringBuilder contentSb = new StringBuilder();
+                    long applyStartMs = System.currentTimeMillis();
                     try {
                         for (CanalEntry.Entry entry : message.getEntries()) {
                             if (entry.getEntryType() == CanalEntry.EntryType.TRANSACTIONBEGIN ||
@@ -300,6 +321,13 @@ public class CanalSyncEngine {
                                     log.error("[IncrSync] apply error table={}", table, e);
                                 }
                             }
+                        }
+
+                        // 本批应用到目标库的耗时, 用于大盘瓶颈判断
+                        if (metrics != null) {
+                            metrics.finishBatch(inserts + updates + deletes, getMs,
+                                    System.currentTimeMillis() - applyStartMs,
+                                    System.currentTimeMillis() - batchStartMs);
                         }
 
                         // ack - 标记 batch 已处理
@@ -366,6 +394,7 @@ public class CanalSyncEngine {
 
                 SyncTaskProgress p = progressMapper.selectOne(
                         new QueryWrapper<SyncTaskProgress>().eq("task_id", task.getId()));
+                long totalRows = p == null || p.getTotalRows() == null ? 0L : p.getTotalRows();
                 if (p != null) {
                     p.setStatus(SyncType.STATUS_FAILED);
                     p.setEndTime(new Date());
@@ -375,9 +404,18 @@ public class CanalSyncEngine {
                 task.setStatus(SyncType.STATUS_FAILED);
                 taskMapper.updateById(task);
 
+                // 写一条 batchNo=0 的失败日志, "日志"弹窗里能看到具体异常
+                String errMsg = e.getMessage();
+                SyncContext ctx = buildCtx(task, src, tgt);
+                logService.writeLog(ctx, 0, null, null, 0, totalRows, 0L,
+                        SyncType.LOG_FAILED,
+                        errMsg == null ? e.getClass().getName() : errMsg);
+
                 WORKERS.remove(task.getId());
                 JdbcUtils.closeQuietly();
             } finally {
+                TaskMetrics m = metricsRegistry.get(task.getId());
+                if (m != null) m.deactivate();
                 try { connector.disconnect(); } catch (Exception ignored) {}
             }
         }

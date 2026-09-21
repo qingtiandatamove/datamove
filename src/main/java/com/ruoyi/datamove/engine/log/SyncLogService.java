@@ -1,6 +1,8 @@
 package com.ruoyi.datamove.engine.log;
 
 import com.ruoyi.datamove.engine.SyncContext;
+import com.ruoyi.datamove.engine.consts.SyncType;
+import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.mapper.SyncTaskLogMapper;
 import lombok.RequiredArgsConstructor;
@@ -67,5 +69,31 @@ public class SyncLogService {
     private String truncate(String s, int max) {
         if (s == null) return null;
         return s.length() <= max ? s : s.substring(0, max) + "...(已截断)";
+    }
+
+    /**
+     * 写一条启动失败日志 (同步任务 start() 时失败, 还未建立 SyncContext 时使用)
+     *  - batchNo = 0 表示启动阶段 (业务批次从 1 开始)
+     *  - 异步落库, 不阻塞 start() 抛异常的链路
+     */
+    @Async("syncExecutor")
+    public void writeStartupFailureLog(SyncTask task, String errorMsg) {
+        try {
+            SyncTaskLog l = new SyncTaskLog();
+            l.setTaskId(task.getId());
+            l.setTaskName(task.getTaskName());
+            l.setTableName(task.getTableName());
+            l.setSyncMode(task.getSyncMode());
+            l.setBatchNo(0);
+            l.setBatchRows(0);
+            l.setTotalRows(0L);
+            l.setCostMs(0L);
+            l.setStatus(SyncType.LOG_FAILED);
+            l.setErrorMsg(truncate(errorMsg, 2000));
+            l.setCreateTime(new Date());
+            logMapper.insert(l);
+        } catch (Exception e) {
+            log.error("write startup-failure log error", e);
+        }
     }
 }

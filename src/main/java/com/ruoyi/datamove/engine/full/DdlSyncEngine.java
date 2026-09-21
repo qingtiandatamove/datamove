@@ -58,15 +58,21 @@ public class DdlSyncEngine {
         SyncDatasource tgt = datasourceMapper.selectById(task.getTargetId());
         if (src == null || tgt == null) throw new RuntimeException("任务关联的数据源不存在");
 
-        if (!JdbcUtils.testConnection(src)) {
+        String srcErr = JdbcUtils.getConnectError(src);
+        if (srcErr != null) {
+            String msg = "无法连接源数据库: " + srcErr;
             AlertUtils.alert(task, "启动失败:源库连接失败",
-                    "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:源库连接失败");
-            throw new RuntimeException("无法连接源数据库");
+                    "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:源库连接失败 - " + srcErr);
+            logService.writeStartupFailureLog(task, msg);
+            throw new RuntimeException(msg);
         }
-        if (!JdbcUtils.testConnection(tgt)) {
+        String tgtErr = JdbcUtils.getConnectError(tgt);
+        if (tgtErr != null) {
+            String msg = "无法连接目标数据库: " + tgtErr;
             AlertUtils.alert(task, "启动失败:目标库连接失败",
-                    "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:目标库连接失败");
-            throw new RuntimeException("无法连接目标数据库");
+                    "【DataMove告警】任务[" + task.getTaskName() + "]启动失败:目标库连接失败 - " + tgtErr);
+            logService.writeStartupFailureLog(task, msg);
+            throw new RuntimeException(msg);
         }
 
         RUNNING_TASK.add(taskId);

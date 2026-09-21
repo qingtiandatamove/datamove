@@ -4,6 +4,11 @@ import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import lombok.extern.slf4j.Slf4j;
 
 import java.sql.*;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.ReentrantLock;
@@ -20,6 +25,12 @@ public class JdbcUtils {
 
     /** 简单缓存: 数据源配置 -> DataSource */
     private static final Map<String, DataSourceHolder> POOL = new ConcurrentHashMap<>();
+
+    /** 连接统一使用东八区(buildUrl serverTimezone), Date 格式化保持一致 */
+    private static final ZoneId ZONE = ZoneId.of("Asia/Shanghai");
+    private static final DateTimeFormatter DATETIME_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+    private static final DateTimeFormatter TIME_FMT = DateTimeFormatter.ofPattern("HH:mm:ss");
 
     public static String buildUrl(String host, int port, String db) {
         return "jdbc:mysql://" + host + ":" + port + "/" + db
@@ -44,6 +55,30 @@ public class JdbcUtils {
      */
     public static boolean testConnection(SyncDatasource ds) {
         return testConnection(ds.getHost(), ds.getPort(), ds.getDbName(),
+                ds.getUsername(), ds.getPlainPassword());
+    }
+
+    /**
+     * 测试连接并返回底层错误信息, 用于启动失败场景透出真实原因
+     *  - 连接成功返回 null
+     *  - 失败返回 SQLException.getMessage(), 例如:
+     *      - Access denied for user 'root'@'127.0.0.1' (using password: YES)
+     *      - Communications link failure
+     *      - Unknown database 'xxx'
+     * 比 boolean testConnection() 多保留了底层原因, 不至于只报 "无法连接数据库"
+     */
+    public static String getConnectError(String host, int port, String db, String user, String pass) {
+        try (Connection c = DriverManager.getConnection(buildUrl(host, port, db), user, pass)) {
+            return null;
+        } catch (Exception e) {
+            log.warn("test connection fail {}:{} db={} err={}", host, port, db, e.getMessage());
+            return e.getMessage();
+        }
+    }
+
+    /** 重载: 直接传 SyncDatasource */
+    public static String getConnectError(SyncDatasource ds) {
+        return getConnectError(ds.getHost(), ds.getPort(), ds.getDbName(),
                 ds.getUsername(), ds.getPlainPassword());
     }
 
@@ -234,6 +269,31 @@ public class JdbcUtils {
             log.error("getIndexes failed", e);
         }
         return list;
+    }
+
+    /**
+     * 查询结果取值统一处理: 时间类型转成字符串, 其余类型原样返回
+     *  - datetime/timestamp -> yyyy-MM-dd HH:mm:ss
+     *  - date               -> yyyy-MM-dd
+     *  - time               -> HH:mm:ss
+     *
+     * MySQL 8 驱动 getObject() 对时间列返回 LocalDateTime/LocalDate/LocalTime,
+     * 直接交给 Jackson 会输出 "2026-09-16T16:22:24" 这种带 T 的 ISO 串,
+     * 表格展示不友好, 日期控件(value-format=yyyy-MM-dd HH:mm:ss)也解析不到值。
+     */
+    public static Object normalizeValue(Object v) {
+        if (v == null) return null;
+        if (v instanceof LocalDateTime) return ((LocalDateTime) v).format(DATETIME_FMT);
+        if (v instanceof LocalDate) return ((LocalDate) v).format(DATE_FMT);
+        if (v instanceof LocalTime) return ((LocalTime) v).format(TIME_FMT);
+        // java.sql.Timestamp / java.sql.Date 都是 java.util.Date 子类, 需先判断
+        if (v instanceof Timestamp) return ((Timestamp) v).toLocalDateTime().format(DATETIME_FMT);
+        if (v instanceof java.sql.Date) return ((java.sql.Date) v).toLocalDate().format(DATE_FMT);
+        if (v instanceof java.sql.Time) return ((java.sql.Time) v).toLocalTime().format(TIME_FMT);
+        if (v instanceof java.util.Date) {
+            return ((java.util.Date) v).toInstant().atZone(ZONE).toLocalDateTime().format(DATETIME_FMT);
+        }
+        return v;
     }
 
     /**
