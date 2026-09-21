@@ -22,7 +22,48 @@
 | 告警 | 钉钉 Webhook |
 | 数据库 | MySQL 8.0 |
 
-## 三、目录结构
+## 三、整体架构
+
+```mermaid
+flowchart LR
+    subgraph Frontend["前端 (Vue 2 + Element UI)"]
+        UI[数据源/任务/日志<br/>SQL 工作台]
+    end
+    subgraph Backend["后端 (SpringBoot 2.7)"]
+        CTRL[Controller 层]
+        DS[数据源服务]
+        TS[任务服务]
+        FullEng[FullSyncEngine<br/>全量引擎]
+        IncrEng[CanalSyncEngine<br/>增量引擎]
+        SQLEng[SQL 引擎]
+        LogSvc[SyncLogService<br/>异步日志]
+        Ding[钉钉告警]
+    end
+    subgraph Storage["存储"]
+        MySQL[(MySQL 8.0<br/>元数据 + 业务)]
+        Redis[(Redis<br/>Token 缓存)]
+    end
+    subgraph Infra["基础设施"]
+        CanalSrv[Canal Server<br/>订阅 binlog]
+    end
+
+    UI -->|HTTP / Swagger| CTRL
+    CTRL --> DS & TS & SQLEng
+    TS --> FullEng
+    TS --> IncrEng
+    FullEng -->|JDBC 分批| MySQL
+    IncrEng <-->|TCP 11111| CanalSrv
+    CanalSrv -->|订阅 ROW binlog| MySQL
+    FullEng --> LogSvc
+    IncrEng --> LogSvc
+    LogSvc --> MySQL
+    FullEng & IncrEng --> Ding
+    CTRL --> Redis
+```
+
+前端只做展示与配置，同步动作全部落在后端引擎：全量走原生 JDBC 分批拉取，增量走 Canal Client 订阅 binlog，两者共用异步日志与钉钉告警。
+
+## 四、目录结构
 
 ```
 datamove/
@@ -50,15 +91,15 @@ datamove/
         └── views/system/         # 用户管理
 ```
 
-## 四、核心模块说明
+## 五、核心模块说明
 
-### 4.1 数据源管理 - 对应文档 3.1
+### 5.1 数据源管理 - 对应文档 3.1
 - 增 / 删 / 改 / 查
 - **测试连接**:实时校验数据库连通性 + 账号权限
 - 数据库密码 AES 加密,前端密文 (前 2 位 + **** + 后 2 位) 回显
 - 删除前检查是否被任务引用
 
-### 4.2 同步任务管理 - 对应文档 3.2
+### 5.2 同步任务管理 - 对应文档 3.2
 - 支持两种任务类型: **全量 (FULL) / 增量 (INCR-Binlog)**
 - 全量同步两种模式:
   - **按主键 ID** (`WHERE id > #{lastId} ORDER BY id ASC LIMIT #{batchSize}`)
@@ -68,23 +109,23 @@ datamove/
 - 任务操作:启动 / 暂停 / 继续 / 终止 / 查看日志
 - **单实例保护**:同一任务只能有一个 worker 在跑
 
-### 4.3 同步日志 - 对应文档 3.3
+### 5.3 同步日志 - 对应文档 3.3
 - 任务总进度 / 单批次明细日志 / 异常错误日志
 - 支持按任务 ID、状态、表名筛选
 - 支持 CSV 导出
 
-### 4.4 钉钉告警 - 对应文档 3.4
+### 5.4 钉钉告警 - 对应文档 3.4
 - 全量任务运行失败 / 中断终止
 - 增量 Binlog 断开 / 监听异常
 - 数据源连接超时 / 失败
 - 行数不一致
 
-### 4.5 用户权限 - 对应文档 3.6
+### 5.5 用户权限 - 对应文档 3.6
 - **超级管理员 (admin)**:所有权限
 - **普通操作员 (operator)**:仅查看任务、启停任务、查看日志
 - 超级管理员账号内置,启动时强制首次修改密码
 
-## 五、数据库表结构 - 对应文档 4
+## 六、数据库表结构 - 对应文档 4
 
 | 表 | 说明 |
 |----|------|
@@ -95,7 +136,7 @@ datamove/
 | `sync_canal_position` | Canal 增量监听位点 |
 | `sys_user / sys_role / sys_user_role / sys_menu / sys_role_menu` | RuoYi 框架权限 |
 
-## 六、快速启动
+## 七、快速启动
 
 ### 1. 准备环境
 - JDK 1.8+
@@ -132,7 +173,7 @@ npm run dev
 |------|------|------|
 | admin | admin123 | 超级管理员 |
 
-## 七、数据库初始化值
+## 八、数据库初始化值
 
 
 第一次登录后请立即:
@@ -140,7 +181,7 @@ npm run dev
 2. 添加需要同步的源库 / 目标库
 3. 创建第一个同步任务
 
-## 八、增量同步前置准备 (Canal)
+## 九、增量同步前置准备 (Canal)
 
 仅全量可跳过。启用增量前:
 ```sql
@@ -157,7 +198,7 @@ SET GLOBAL binlog_format = 'ROW';
 - Canal Port (默认 11111)
 - Canal Destination (canal 配置文件中 instance 名)
 
-## 九、二期预留(本次未实现)
+## 十、二期预留(本次未实现)
 
 - DDL 表结构同步
 - 多线程极速同步
@@ -168,11 +209,11 @@ SET GLOBAL binlog_format = 'ROW';
 
 ---
 
-## 十、性能实测：10 万 / 100 万行全量同步
+## 十一、性能实测：10 万 / 100 万行全量同步
 
 > 下列数字全部取自 `sync_task_log`（批次明细）与 `sync_task_progress`（断点记录）的真实落库数据，未做估算或美化。
 
-### 10.1 测试环境
+### 11.1 测试环境
 
 | 项 | 值 |
 | --- | --- |
@@ -187,7 +228,7 @@ SET GLOBAL binlog_format = 'ROW';
 
 > 源库与目标库是**同一个 MySQL 实例**，读和写在同一个 buffer pool 里循环，因此这是一组「单机上限」数据，真实跨机同步还要再扣掉网络 RTT 与带宽开销。
 
-### 10.2 同步总耗时
+### 11.2 同步总耗时
 
 两次均为 `overwrite_flag=1` 的覆盖式全量：先 `TRUNCATE` 目标表、清空断点，再从 `id > 0` 重新拉一遍全表。
 
@@ -200,7 +241,7 @@ SET GLOBAL binlog_format = 'ROW';
 - 用例 A 起止 `10:50:46 → 10:51:02`；用例 B 起止 `10:54:33 → 10:57:57`。
 - 12 / 13 批中的最后两批是收尾：先取到剩余 23 行，再取一次空集确认到底，`while` 循环才退出。
 
-### 10.3 批次明细
+### 11.3 批次明细
 
 <details>
 <summary><b>用例 A：10 万行（batch_size = 10,000，总耗时 18.0 s）</b></summary>
@@ -245,7 +286,7 @@ SET GLOBAL binlog_format = 'ROW';
 
 </details>
 
-### 10.4 结论
+### 11.4 结论
 
 1. **线性度好，100 万行量级没有劣化**：数据量放大 11 倍，单行耗时只从 0.180 ms 涨到 0.186 ms（+3.3%），吞吐仅下降 2.8%。说明 `setFetchSize(batchSize)` 的流式读取确实生效——内存占用未随数据量膨胀，全程无 OOM、无 GC 抖动。
 2. **`batch_size` 从 1 万放大到 10 万，吞吐几乎没变**：两次用例 `batch_size` 差 10 倍，吞吐只差 2.8%（且更大的批次略慢）。瓶颈**不在**网络往返 / 事务提交次数，而在单行写目标表（2 个二级索引维护 + 每批 `commit` 刷盘）。因此 `batch_size` 应按「失败回滚代价」来选，**推荐 1,000 ~ 10,000**。
