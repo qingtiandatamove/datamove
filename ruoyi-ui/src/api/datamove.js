@@ -9,6 +9,7 @@ export function deleteDataSource (id) { return request({ url: `/sync/datasource/
 export function testDataSource (data) { return request({ url: '/sync/datasource/test', method: 'post', data }) }
 export function listTables (id) { return request({ url: `/sync/datasource/${id}/tables`, method: 'get' }) }
 export function listColumns (id, table) { return request({ url: `/sync/datasource/${id}/columns`, method: 'get', params: { table } }) }
+export function getTableSchema (id, table) { return request({ url: `/sync/datasource/${id}/table/${table}/schema`, method: 'get' }) }
 
 /* ============ 数据浏览 ============ */
 export function browseData (id, table, params) { return request({ url: `/sync/browse/${id}/table/${table}/data`, method: 'get', params }) }
@@ -26,6 +27,15 @@ export function dropIndex (id, table, data) { return request({ url: `/sync/brows
 
 /* ============ SQL 工作台 ============ */
 export function execSql (id, sql) { return request({ url: `/sync/sql/${id}/execute`, method: 'post', data: { sql } }) }
+export function explainSql (id, sql, analyze) { return request({ url: `/sync/sql/${id}/explain`, method: 'post', data: { sql, analyze: !!analyze } }) }
+
+/* ============ SQL 工作台 收藏 ============ */
+export function pageSqlFavorite (params) { return request({ url: '/sync/sql/favorite/page', method: 'get', params }) }
+export function detailSqlFavorite (id) { return request({ url: `/sync/sql/favorite/${id}`, method: 'get' }) }
+export function addSqlFavorite (data) { return request({ url: '/sync/sql/favorite', method: 'post', data }) }
+export function updateSqlFavorite (data) { return request({ url: '/sync/sql/favorite', method: 'put', data }) }
+export function deleteSqlFavorite (id) { return request({ url: `/sync/sql/favorite/${id}`, method: 'delete' }) }
+export function useSqlFavorite (id) { return request({ url: `/sync/sql/favorite/${id}/use`, method: 'post' }) }
 
 /* ============ SQL 执行日志 ============ */
 export function pageSqlLog (params) { return request({ url: '/sync/sql/log/page', method: 'get', params }) }

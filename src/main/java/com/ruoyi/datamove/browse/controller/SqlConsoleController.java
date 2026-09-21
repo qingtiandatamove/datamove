@@ -40,6 +40,82 @@ public class SqlConsoleController {
     /** 单语句超时(秒) */
     private static final int TIMEOUT_SECONDS = 30;
 
+    @ApiOperation("EXPLAIN 执行计划 (SELECT/WITH/SHOW/TABLE/DESCRIBE/VALUES)")
+    @PostMapping("/{dsId}/explain")
+    public R<Map<String, Object>> explain(@PathVariable Long dsId, @RequestBody Map<String, Object> body) {
+        SyncDatasource ds = datasourceMapper.selectById(dsId);
+        if (ds == null) return R.fail("数据源不存在: " + dsId);
+        String sql = body.get("sql") == null ? "" : String.valueOf(body.get("sql")).trim();
+        if (sql.isEmpty()) return R.fail("SQL 不能为空");
+        Boolean analyze = Boolean.TRUE.equals(body.get("analyze"));
+
+        // 仅允许单条
+        List<String> stmts = splitStatements(sql);
+        if (stmts.isEmpty()) return R.fail("没有可执行的语句");
+        if (stmts.size() > 1) return R.fail("EXPLAIN 仅支持单条 SELECT / WITH / SHOW / TABLE / VALUES / DESCRIBE");
+        String one = stmts.get(0);
+
+        // 首词白名单
+        String head = stripComments(one).trim();
+        String first = head.isEmpty() ? "" : head.split("\\s+", 2)[0].toUpperCase();
+        boolean allowed = first.equals("SELECT") || first.equals("WITH") || first.equals("SHOW")
+                       || first.equals("EXPLAIN") || first.equals("TABLE") || first.equals("VALUES")
+                       || first.equals("DESC") || first.equals("DESCRIBE");
+        if (!allowed) return R.fail("EXPLAIN 仅支持 SELECT / WITH / SHOW / TABLE / VALUES / DESCRIBE (当前首词: " + first + ")");
+
+        // EXPLAIN ANALYZE 二次确认: 客户端必须显式传 analyze=true, 默认 false
+        String explainSql = first.equals("EXPLAIN") ? one
+                : (analyze ? "EXPLAIN ANALYZE " + one : "EXPLAIN " + one);
+
+        long start = System.currentTimeMillis();
+        Map<String, Object> result;
+        try (Connection c = JdbcUtils.getConnection(ds)) {
+            result = executeOne(c, explainSql);
+        } catch (SQLException e) {
+            sqlLogService.record(dsId, ds.getDatasourceName(), ds.getDbName(), "SQL_EXPLAIN",
+                    sql, 1, 0, 0, System.currentTimeMillis() - start, "FAILED", e.getMessage());
+            return R.fail("执行失败: " + e.getMessage());
+        }
+        long elapsed = System.currentTimeMillis() - start;
+        long rows = toLong(result.get("total"));
+        sqlLogService.record(dsId, ds.getDatasourceName(), ds.getDbName(), "SQL_EXPLAIN",
+                sql, 1, rows, 0, elapsed, "SUCCESS", null);
+
+        Map<String, Object> out = new HashMap<>();
+        out.put("result", result);
+        out.put("analyze", analyze);
+        out.put("elapsed", elapsed);
+        out.put("sql", explainSql);
+        return R.ok(out);
+    }
+
+    /** 去除行注释/块注释, 用于识别首词 (不影响原 splitStatements 的拆语句行为) */
+    private String stripComments(String sql) {
+        StringBuilder sb = new StringBuilder(sql.length());
+        int i = 0;
+        int n = sql.length();
+        while (i < n) {
+            char ch = sql.charAt(i);
+            if (ch == '-' && i + 1 < n && sql.charAt(i + 1) == '-') {
+                while (i < n && sql.charAt(i) != '\n') i++;
+                continue;
+            }
+            if (ch == '#') {
+                while (i < n && sql.charAt(i) != '\n') i++;
+                continue;
+            }
+            if (ch == '/' && i + 1 < n && sql.charAt(i + 1) == '*') {
+                i += 2;
+                while (i + 1 < n && !(sql.charAt(i) == '*' && sql.charAt(i + 1) == '/')) i++;
+                i = Math.min(n, i + 2);
+                continue;
+            }
+            sb.append(ch);
+            i++;
+        }
+        return sb.toString();
+    }
+
     @ApiOperation("执行 SQL (支持多语句)")
     @PostMapping("/{dsId}/execute")
     public R<Map<String, Object>> execute(@PathVariable Long dsId, @RequestBody Map<String, String> body) {

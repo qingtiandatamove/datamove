@@ -188,6 +188,55 @@ public class JdbcUtils {
     }
 
     /**
+     * 取表元信息: engine / collation / tableComment
+     */
+    public static Map<String, String> getTableMeta(SyncDatasource ds, String tableName) {
+        Map<String, String> meta = new LinkedHashMap<>();
+        String sql = "SELECT ENGINE, TABLE_COLLATION, IF(TABLE_COMMENT='', NULL, TABLE_COMMENT) AS TABLE_COMMENT " +
+                "FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?";
+        try (Connection c = getConnection(ds);
+             PreparedStatement ps = c.prepareStatement(sql)) {
+            ps.setString(1, ds.getDbName());
+            ps.setString(2, tableName);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    meta.put("engine", rs.getString("ENGINE"));
+                    meta.put("collation", rs.getString("TABLE_COLLATION"));
+                    meta.put("tableComment", rs.getString("TABLE_COMMENT"));
+                }
+            }
+        } catch (SQLException e) {
+            log.error("getTableMeta failed", e);
+        }
+        return meta;
+    }
+
+    /**
+     * 取表的索引信息 (SHOW INDEX FROM)
+     */
+    public static List<Map<String, String>> getIndexes(SyncDatasource ds, String tableName) {
+        List<Map<String, String>> list = new ArrayList<>();
+        if (tableName == null || !tableName.matches("[A-Za-z0-9_]+")) return list;
+        String sql = "SHOW INDEX FROM `" + tableName + "`";
+        try (Connection c = getConnection(ds);
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            while (rs.next()) {
+                Map<String, String> m = new LinkedHashMap<>();
+                m.put("keyName", rs.getString("Key_name"));
+                m.put("columnName", rs.getString("Column_name"));
+                m.put("seqInIndex", String.valueOf(rs.getInt("Seq_in_index")));
+                m.put("nonUnique", rs.getString("Non_unique"));
+                m.put("indexType", rs.getString("Index_type"));
+                list.add(m);
+            }
+        } catch (SQLException e) {
+            log.error("getIndexes failed", e);
+        }
+        return list;
+    }
+
+    /**
      * 关闭并移除缓存中的连接
      */
     public static void closeQuietly(AutoCloseable... cs) {

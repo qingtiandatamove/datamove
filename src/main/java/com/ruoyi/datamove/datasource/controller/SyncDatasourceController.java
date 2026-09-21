@@ -95,4 +95,24 @@ public class SyncDatasourceController {
         if (ds == null) return R.fail("数据源不存在");
         return R.ok(JdbcUtils.listColumns(ds, table));
     }
+
+    @ApiOperation("获取完整表结构 (列/索引/元信息/DDL)")
+    @GetMapping("/{id}/table/{table}/schema")
+    public R<Map<String, Object>> tableSchema(@PathVariable Long id, @PathVariable String table) {
+        SyncDatasource ds = datasourceService.getById(id);
+        if (ds == null) return R.fail("数据源不存在");
+        if (table == null || !table.matches("[A-Za-z0-9_]+")) return R.fail("非法表名");
+
+        Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("tableName", table);
+        out.put("dsId", id);
+        Map<String, String> meta = JdbcUtils.getTableMeta(ds, table);
+        out.put("engine", meta.getOrDefault("engine", ""));
+        out.put("collation", meta.getOrDefault("collation", ""));
+        out.put("tableComment", meta.getOrDefault("tableComment", ""));
+        out.put("columns", JdbcUtils.listColumns(ds, table));
+        out.put("indexes", JdbcUtils.getIndexes(ds, table));
+        out.put("ddl", JdbcUtils.getShowCreateTable(ds, table));
+        return R.ok(out);
+    }
 }
