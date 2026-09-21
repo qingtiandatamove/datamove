@@ -187,8 +187,8 @@ public class SqlConsoleController {
                     while (rs.next() && rows.size() < MAX_ROWS) {
                         Map<String, Object> row = new LinkedHashMap<>();
                         for (int i = 1; i <= n; i++) {
-                            Object v = rs.getObject(i);
-                            // 二进制/时间类型转字符串, 避免前端序列化异常
+                            // 时间类型先统一格式化(避免带 T 的 ISO 串), 再转字符串防止序列化异常
+                            Object v = JdbcUtils.normalizeValue(rs.getObject(i));
                             row.put(md.getColumnLabel(i), v == null ? null : String.valueOf(v));
                         }
                         rows.add(row);

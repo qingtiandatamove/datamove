@@ -4,6 +4,7 @@ import com.ruoyi.common.core.domain.PageResult;
 import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
+import com.ruoyi.datamove.task.domain.TaskDashboardVO;
 
 import java.util.List;
 
@@ -38,6 +39,12 @@ public interface ISyncTaskService {
 
     /* 进度 */
     SyncTaskProgress progress(Long id);
+
+    /**
+     * 任务大盘: 全部任务的进度 + 运行期实时指标(行/秒、ETA、当前批次、瓶颈库)
+     * 运行中/暂停的任务排在前面
+     */
+    List<TaskDashboardVO> dashboard();
 
     /* 日志 */
     PageResult<SyncTaskLog> logs(Long taskId, String status, int pageNum, int pageSize);

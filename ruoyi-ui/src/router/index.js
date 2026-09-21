@@ -18,6 +18,7 @@ const routes = [
       { path: 'sync/browse',   redirect: '/browse' },
       { path: 'sync/datasource', component: () => import('@/views/sync/datasource.vue'), meta: { title: '数据源管理' } },
       { path: 'sync/task',        component: () => import('@/views/sync/task.vue'),       meta: { title: '同步任务' } },
+      { path: 'sync/dashboard',   component: () => import('@/views/sync/dashboard.vue'),  meta: { title: '任务大盘' } },
       { path: 'sync/log',         component: () => import('@/views/sync/log.vue'),        meta: { title: '同步日志' } },
       { path: 'sync/license',     component: () => import('@/views/sync/license.vue'),    meta: { title: '授权管理' } },
       { path: 'system/user',      component: () => import('@/views/system/user.vue'),     meta: { title: '用户管理' } },

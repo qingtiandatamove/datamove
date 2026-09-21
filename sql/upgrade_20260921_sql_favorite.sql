@@ -4,6 +4,10 @@
 -- 说明: 新增 sync_sql_favorite 表, 存储 SQL 工作台用户收藏的 SQL
 -- ============================================================
 
+-- 客户端字符集未必是 utf8mb4 (容器内 mysql CLI 默认即为 latin1),
+-- 不声明会把脚本里的中文注释按 latin1 二次编码写进库, 导致乱码
+SET NAMES utf8mb4;
+
 DROP TABLE IF EXISTS `sync_sql_favorite`;
 CREATE TABLE `sync_sql_favorite` (
   `id`          BIGINT       NOT NULL AUTO_INCREMENT COMMENT '收藏ID',

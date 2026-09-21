@@ -3,13 +3,18 @@ package com.ruoyi.datamove.task.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ruoyi.common.core.domain.PageResult;
+import com.ruoyi.datamove.datasource.domain.SyncDatasource;
+import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.engine.consts.SyncType;
 import com.ruoyi.datamove.engine.full.DdlSyncEngine;
 import com.ruoyi.datamove.engine.full.FullSyncEngine;
 import com.ruoyi.datamove.engine.incr.CanalSyncEngine;
+import com.ruoyi.datamove.engine.metrics.TaskMetrics;
+import com.ruoyi.datamove.engine.metrics.TaskMetricsRegistry;
 import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
+import com.ruoyi.datamove.task.domain.TaskDashboardVO;
 import com.ruoyi.datamove.task.mapper.SyncTaskLogMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
@@ -19,8 +24,11 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Slf4j
 @Service
@@ -30,9 +38,11 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     private final SyncTaskMapper          taskMapper;
     private final SyncTaskProgressMapper  progressMapper;
     private final SyncTaskLogMapper       logMapper;
+    private final SyncDatasourceMapper    datasourceMapper;
     private final FullSyncEngine          fullSyncEngine;
     private final CanalSyncEngine         canalSyncEngine;
     private final DdlSyncEngine           ddlSyncEngine;
+    private final TaskMetricsRegistry     metricsRegistry;
 
     @Override
     public PageResult<SyncTask> page(String keyword, String taskType, String status,
@@ -135,6 +145,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         // 同步删除日志
         logMapper.delete(new QueryWrapper<SyncTaskLog>().eq("task_id", id));
         progressMapper.delete(new QueryWrapper<SyncTaskProgress>().eq("task_id", id));
+        // 清理运行期实时指标
+        metricsRegistry.remove(id);
     }
 
     @Override
@@ -226,5 +238,153 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     @Override
     public void clearAllLog() {
         logMapper.delete(new QueryWrapper<>());
+    }
+
+    /* ============ 任务大盘 ============ */
+
+    @Override
+    public List<TaskDashboardVO> dashboard() {
+        List<SyncTask> tasks = taskMapper.selectList(
+                new QueryWrapper<SyncTask>().eq("del_flag", "0").orderByDesc("id"));
+        if (tasks.isEmpty()) return new ArrayList<>();
+
+        Map<Long, SyncTaskProgress> progressMap = new HashMap<>();
+        for (SyncTaskProgress p : progressMapper.selectList(null)) {
+            if (p.getTaskId() != null) progressMap.put(p.getTaskId(), p);
+        }
+        Map<Long, SyncDatasource> dsMap = new HashMap<>();
+        for (SyncDatasource ds : datasourceMapper.selectList(null)) {
+            dsMap.put(ds.getId(), ds);
+        }
+
+        long now = System.currentTimeMillis();
+        List<TaskDashboardVO> list = new ArrayList<>(tasks.size());
+        for (SyncTask task : tasks) {
+            list.add(toDashboardVO(task, progressMap.get(task.getId()), dsMap, now));
+        }
+        // 运行中 / 暂停 的排前面, 其余按最近更新倒序
+        list.sort((a, b) -> {
+            int ra = rank(a), rb = rank(b);
+            if (ra != rb) return ra - rb;
+            if (a.getUpdateTime() == null || b.getUpdateTime() == null) return 0;
+            return b.getUpdateTime().compareTo(a.getUpdateTime());
+        });
+        return list;
+    }
+
+    /** 组装单条大盘数据: 任务 + 断点进度 + 运行期实时指标 */
+    private TaskDashboardVO toDashboardVO(SyncTask task, SyncTaskProgress p,
+                                          Map<Long, SyncDatasource> dsMap, long now) {
+        TaskDashboardVO vo = new TaskDashboardVO();
+        vo.setTaskId(task.getId());
+        vo.setTaskName(task.getTaskName());
+        vo.setTaskType(task.getTaskType());
+        vo.setSyncMode(task.getSyncMode());
+        vo.setTableName(task.getTableName());
+        vo.setStatus(task.getStatus());
+        vo.setBatchSize(task.getBatchSize());
+
+        SyncDatasource src = dsMap.get(task.getSourceId());
+        SyncDatasource tgt = dsMap.get(task.getTargetId());
+        vo.setSourceName(src == null ? null : src.getDatasourceName());
+        vo.setTargetName(tgt == null ? null : tgt.getDatasourceName());
+
+        // 缺省值: 无法估算时不展示进度条与 ETA
+        vo.setTotalEstimate(-1L);
+        vo.setEtaSeconds(-1L);
+        vo.setProgress(-1);
+
+        boolean running = SyncType.STATUS_RUNNING.equals(task.getStatus());
+        vo.setRunning(running);
+
+        long successRows = p == null || p.getSuccessRows() == null ? 0L : p.getSuccessRows();
+        vo.setTotalRows(p == null || p.getTotalRows() == null ? 0L : p.getTotalRows());
+        vo.setFailedRows(p == null || p.getFailedRows() == null ? 0L : p.getFailedRows());
+        if (p != null) {
+            vo.setStartTime(p.getStartTime());
+            vo.setUpdateTime(p.getUpdateTime());
+        }
+
+        // 本次运行已同步 = 累计行数 - 启动时的历史累计(续传场景)
+        TaskMetrics m = metricsRegistry.get(task.getId());
+        long baseline = m == null ? 0L : m.getBaselineRows();
+        long syncRows = Math.max(0L, successRows - baseline);
+        vo.setSyncRows(syncRows);
+
+        // 运行时长与平均速率
+        if (p != null && p.getStartTime() != null) {
+            long end = p.getEndTime() == null ? now : p.getEndTime().getTime();
+            long costSeconds = Math.max(0L, (end - p.getStartTime().getTime()) / 1000L);
+            vo.setCostSeconds(costSeconds);
+            if (costSeconds > 0) vo.setAvgRowsPerSec(round1(syncRows * 1.0D / costSeconds));
+        }
+
+        if (m == null) {
+            // 进程重启或本次未启动过: 无实时指标, 已完成的任务直接按 100% 展示
+            if (SyncType.STATUS_COMPLETED.equals(task.getStatus())) vo.setProgress(100);
+            return vo;
+        }
+
+        long estimate = m.getTotalEstimate();
+        vo.setTotalEstimate(estimate);
+        if (estimate > 0) {
+            vo.setRemainRows(Math.max(0L, estimate - syncRows));
+            vo.setProgress((int) Math.min(100L, syncRows * 100L / estimate));
+        } else if (SyncType.STATUS_COMPLETED.equals(task.getStatus())) {
+            vo.setProgress(100);
+        }
+
+        double rate = m.liveRowsPerSec();
+        vo.setRowsPerSec(round1(rate));
+        vo.setCurrentBatch(m.getCurrentBatch());
+        vo.setCurrentBatchRows(m.getCurrentBatchRows());
+        vo.setLastBatchCostMs(m.getLastBatchCostMs());
+        vo.setReadMs(round1(m.getReadMs()));
+        vo.setWriteMs(round1(m.getWriteMs()));
+        vo.setBottleneck(m.getBottleneck());
+        vo.setBottleneckText(bottleneckText(m.getBottleneck(), task.getTaskType()));
+
+        // ETA: 只在运行中、有实时速率、且已知总量时给出
+        if (running && rate > 0 && estimate > 0) {
+            long eta = (long) Math.ceil(Math.max(0L, estimate - syncRows) / rate);
+            vo.setEtaSeconds(eta);
+            vo.setEtaText(formatEta(eta));
+        }
+        return vo;
+    }
+
+    /** 大盘排序权重: 运行中 > 暂停 > 其他 */
+    private static int rank(TaskDashboardVO vo) {
+        if (SyncType.STATUS_RUNNING.equals(vo.getStatus())) return 0;
+        if (SyncType.STATUS_PAUSE.equals(vo.getStatus())) return 1;
+        return 2;
+    }
+
+    private static Double round1(double v) {
+        return Math.round(v * 10D) / 10D;
+    }
+
+    /** 瓶颈可读文本, 无法判定时返回 null */
+    private static String bottleneckText(String bottleneck, String taskType) {
+        if (TaskMetrics.SOURCE.equals(bottleneck)) return "源库";
+        if (TaskMetrics.TARGET.equals(bottleneck)) return "目标库";
+        if (TaskMetrics.BALANCED.equals(bottleneck)) {
+            // 增量任务: 大部分时间在等 binlog 事件, 写入耗时没超过等待时间即无瓶颈
+            return SyncType.TASK_INCR.equalsIgnoreCase(taskType) ? "无瓶颈" : "读写均衡";
+        }
+        return null;
+    }
+
+    /** ETA 可读文本: 1h2m3s */
+    private static String formatEta(long seconds) {
+        if (seconds < 0) return null;
+        if (seconds > 99L * 3600L) return ">99h";
+        long h = seconds / 3600L;
+        long mi = seconds % 3600L / 60L;
+        long s = seconds % 60L;
+        StringBuilder sb = new StringBuilder();
+        if (h > 0) sb.append(h).append("h");
+        if (h > 0 || mi > 0) sb.append(mi).append("m");
+        return sb.append(s).append("s").toString();
     }
 }

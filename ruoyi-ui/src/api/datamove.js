@@ -56,6 +56,8 @@ export function resumeTask (id) { return request({ url: `/sync/task/${id}/resume
 export function stopTask (id) { return request({ url: `/sync/task/${id}/stop`, method: 'post' }) }
 export function resetTask (id) { return request({ url: `/sync/task/${id}/reset`, method: 'post' }) }
 export function taskProgress (id) { return request({ url: `/sync/task/${id}/progress`, method: 'get' }) }
+/* 任务大盘: 进度 + 实时速率/ETA/当前批次/瓶颈库 */
+export function taskDashboard () { return request({ url: '/sync/task/dashboard', method: 'get' }) }
 
 /* ============ 日志 ============ */
 export function pageLog (params) { return request({ url: '/sync/log/page', method: 'get', params }) }

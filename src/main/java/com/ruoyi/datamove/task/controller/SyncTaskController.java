@@ -5,6 +5,7 @@ import com.ruoyi.common.core.domain.R;
 import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
+import com.ruoyi.datamove.task.domain.TaskDashboardVO;
 import com.ruoyi.datamove.task.service.ISyncTaskService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -12,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import javax.validation.Valid;
+import java.util.List;
 
 @Api(tags = "同步任务管理")
 @RestController
@@ -31,6 +33,12 @@ public class SyncTaskController {
                                         @RequestParam(required = false, defaultValue = "id") String orderByColumn,
                                         @RequestParam(required = false, defaultValue = "asc") String isAsc) {
         return R.ok(taskService.page(keyword, taskType, status, orderByColumn, isAsc, pageNum, pageSize));
+    }
+
+    @ApiOperation("任务大盘(行/秒、ETA、当前批次、瓶颈库)")
+    @GetMapping("/dashboard")
+    public R<List<TaskDashboardVO>> dashboard() {
+        return R.ok(taskService.dashboard());
     }
 
     @ApiOperation("详情")

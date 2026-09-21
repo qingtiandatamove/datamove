@@ -6,6 +6,10 @@
 -- 执行: mysql -uroot -p datamove < upgrade_20260921_alert_email.sql
 -- ============================================================
 
+-- 客户端字符集未必是 utf8mb4 (容器内 mysql CLI 默认即为 latin1),
+-- 不声明会把脚本里的中文注释按 latin1 二次编码写进库, 导致乱码
+SET NAMES utf8mb4;
+
 DROP PROCEDURE IF EXISTS `datamove_add_alert_email`;
 DELIMITER $$
 CREATE PROCEDURE `datamove_add_alert_email`()

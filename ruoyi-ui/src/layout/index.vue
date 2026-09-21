@@ -22,6 +22,7 @@
           <template slot="title"><i class="el-icon-share"></i><span>数据集成中心</span></template>
           <el-menu-item index="/sync/datasource"><i class="el-icon-collection"></i><span>数据源管理</span></el-menu-item>
           <el-menu-item index="/sync/task"><i class="el-icon-pie-chart"></i><span>同步任务</span></el-menu-item>
+          <el-menu-item index="/sync/dashboard"><i class="el-icon-odometer"></i><span>任务大盘</span></el-menu-item>
           <el-menu-item index="/sync/log"><i class="el-icon-document"></i><span>同步日志</span></el-menu-item>
           <el-menu-item index="/sync/license"><i class="el-icon-key"></i><span>授权管理</span></el-menu-item>
         </el-submenu>

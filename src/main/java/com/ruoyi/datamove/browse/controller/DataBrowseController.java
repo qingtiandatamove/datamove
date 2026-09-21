@@ -78,7 +78,8 @@ public class DataBrowseController {
                     while (rs.next()) {
                         Map<String, Object> row = new LinkedHashMap<>();
                         for (int i = 1; i <= n; i++) {
-                            row.put(md.getColumnLabel(i), rs.getObject(i));
+                            // 时间列统一格式化为 yyyy-MM-dd HH:mm:ss / yyyy-MM-dd / HH:mm:ss
+                            row.put(md.getColumnLabel(i), JdbcUtils.normalizeValue(rs.getObject(i)));
                         }
                         rows.add(row);
                     }
