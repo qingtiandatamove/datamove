@@ -34,12 +34,11 @@
 │ 数据浏览     │ 在线分页浏览任意已注册数据源（带行数统计）    │
 │ 同步日志     │ 批次明细 + 总进度，支持 CSV 导出             │
 │ 告警         │ 钉钉 Webhook 主动推送（启动失败/中断/对账异常）│
-│ 授权         │ MAC + LicenseKey 一机一绑，离线可用          │
 │ 权限         │ admin / operator 两级 RBAC                   │
 └──────────────┴─────────────────────────────────────────────┘
 ```
 
-对比 DataX / Canal-adapter / DTS 这些"老炮"，DataMove 的优势是 **零代码 + 全中文 + 自带可视化 + 自带授权**，适合中小团队"开箱即用"。
+对比 DataX / Canal-adapter / DTS 这些"老炮"，DataMove 的优势是 **零代码 + 全中文 + 自带可视化**，适合中小团队"开箱即用"。
 
 ---
 
@@ -57,7 +56,6 @@ flowchart LR
         FullEng[FullSyncEngine<br/>全量引擎]
         IncrEng[CanalSyncEngine<br/>增量引擎]
         SQLEng[SQL 引擎]
-        Lic[License 服务]
         LogSvc[SyncLogService<br/>异步日志]
         Ding[钉钉告警]
     end
@@ -70,7 +68,7 @@ flowchart LR
     end
 
     UI -->|HTTP / Swagger| CTRL
-    CTRL --> DS & TS & SQLEng & Lic
+    CTRL --> DS & TS & SQLEng
     TS --> FullEng
     TS --> IncrEng
     FullEng -->|JDBC 分批| MySQL
@@ -94,7 +92,6 @@ com.ruoyi.datamove
 │   ├── incr        // CanalSyncEngine (增量 + 位点 ACK)
 │   └── log         // SyncLogService  (批次明细)
 ├── browse          // 在线浏览数据
-├── license         // 离线授权校验
 └── log             // 日志导出 controller
 ```
 
@@ -216,33 +213,7 @@ try {
 
 ---
 
-## 九、License：离线授权与续费
-
-DataMove 以"私有化 jar + 月订阅"为商业模式：
-
-- 启动期一次性联网校验 `licenseKey + mac + expireTime`。
-- 启动成功后**完全离线运行**，不依赖云端。
-- 校验维度：`LicenseKey 合法性` + `MAC 绑定` + `到期时间`。
-- 过期前 7 天每天钉钉提醒；过期后下次启动直接拒绝。
-- 管理员可在 Web 后台手动续期（不暴露 LicenseKey，只改过期时间）。
-
-```java
-// 启动校验：联网一次 + 失败也允许跑（首次注册 + 本地校验通过则通过）
-public void verifyOnStartup() {
-    String mac = MacUtils.getLocalMac();
-    License local = licenseMapper.selectOne();
-    if (local == null) {
-        local = autoRegister30DaysTrial(mac);   // 首次启动送 30 天试用
-    }
-    if (!mac.equalsIgnoreCase(local.getMac())) throw new BusinessException("MAC 不匹配");
-    if (local.getExpireTime().before(new Date())) throw new BusinessException("License 已过期");
-    verifyOnlineAsync(local, mac);               // 联网校验仅记录日志，不阻塞启动
-}
-```
-
----
-
-## 十、告警：钉钉 Webhook 主动推送
+## 九、告警：钉钉 Webhook 主动推送
 
 | 触发场景 | 推送内容 |
 | --- | --- |
@@ -254,7 +225,7 @@ public void verifyOnStartup() {
 
 ---
 
-## 十一、十分钟跑起来
+## 十、十分钟跑起来
 
 ```bash
 # 1. 初始化 MySQL
@@ -275,27 +246,26 @@ npm run dev
 docker compose -f docker/canal/docker-compose.yml up -d
 ```
 
-首次登录后 4 步即可同步：
-1. **授权管理** → 确认 License 状态（首次启动自动 30 天试用）。
-2. **数据源** → 添加源库与目标库 → 点 "测试连接"。
-3. **任务** → 新建任务（全量或增量）→ 点 "启动" → 在 "同步日志" 看实时进度。
-4. **钉钉** → 在任务里填 Webhook → 异常自动推送到钉钉群。
+首次登录后 3 步即可同步：
+1. **数据源** → 添加源库与目标库 → 点 "测试连接"。
+2. **任务** → 新建任务（全量或增量）→ 点 "启动" → 在 "同步日志" 看实时进度。
+3. **钉钉** → 在任务里填 Webhook → 异常自动推送到钉钉群。
 
 ---
 
-## 十二、安全与权限
+## 十一、安全与权限
 
-- 密码 / LicenseKey / 数据源密码全部入库前 AES 加密。
+- 密码 / 数据源密码全部入库前 AES 加密。
 - 前端回显只显示 `前 2 位 **** 后 2 位`，明文绝不出现。
 - Spring Security + JWT，路由级权限。
 - 内置两种角色：
-  - **admin**：全权，可改 License、可改数据源密码。
+  - **admin**：全权，可改数据源密码。
   - **operator**：仅查看任务、启停任务、看日志，零数据源操作权限。
 - `admin` 默认密码首次登录强制修改。
 
 ---
 
-## 十三、性能与稳定性经验
+## 十二、性能与稳定性经验
 
 1. **JDBC 批写 1000 行/批**：经测试，`addBatch + executeBatch` 比单条 INSERT 快 50~80 倍；1000 行是吞吐与事务回滚成本的甜点。
 2. **`setFetchSize(batchSize)`**：MySQL 驱动必须显式设才能流式取，否则会一次性把所有数据塞进内存（OOM 重灾区）。
@@ -304,11 +274,11 @@ docker compose -f docker/canal/docker-compose.yml up -d
 
 ---
 
-## 十四、实测：10 万 / 100 万行全量同步压测
+## 十三、实测：10 万 / 100 万行全量同步压测
 
 > 下面每一个数字都来自 `sync_task_log`（批次日志）和 `sync_task_progress`（断点记录）两张表的真实落库数据，没有估算、没有美化。
 
-### 14.1 测试环境
+### 13.1 测试环境
 
 | 项 | 值 |
 | --- | --- |
@@ -323,7 +293,7 @@ docker compose -f docker/canal/docker-compose.yml up -d
 
 > ⚠️ 源库与目标库是**同一个 MySQL 实例**，读和写在同一个 buffer pool 里循环。所以这是一组"单机上限"数据，真实跨机同步还要再扣掉网络 RTT 和带宽开销。
 
-### 14.2 两次用例的对比与总耗时
+### 13.2 两次用例的对比与总耗时
 
 两次都是 `overwrite_flag=1` 的覆盖式全量：先 `TRUNCATE` 目标表、清空断点，再从 `id > 0` 重新拉一遍全表。
 
@@ -338,8 +308,6 @@ docker compose -f docker/canal/docker-compose.yml up -d
 | 单批平均耗时（满批） | 1.80 s | 18.55 s |
 | 单行耗时 | 0.180 ms | 0.186 ms |
 | 失败批次 | 0 | 0 |
-
-> **两次运行合计**：25 个批次、1,200,046 行，同步总耗时 **222.1 s（约 3 分 42 秒）**，加权平均吞吐 **5,402 行/秒**，单行耗时 0.185 ms。
 
 **用例 A 批次明细（`batch_size=10,000`）**
 
@@ -357,6 +325,7 @@ docker compose -f docker/canal/docker-compose.yml up -d
 | 10 | 90,185 → 100,184 | 10,000 | 100,000 | 1,792 ms |
 | 11 | 100,185 → 100,207 | 23 | 100,023 | 8 ms |
 | 12 | 100,207 → 100,207 | 0 | 100,023 | 4 ms |
+| **合计** | **12 批** | **100,023** | — | **18,038 ms ≈ 18.0 s** |
 
 **用例 B 批次明细（`batch_size=100,000`）**
 
@@ -375,10 +344,11 @@ docker compose -f docker/canal/docker-compose.yml up -d
 | 11 | 1,310,885 → 1,410,884 | 100,000 | 1,100,000 | 17,595 ms |
 | 12 | 1,410,885 → 1,410,907 | 23 | 1,100,023 | 9 ms |
 | 13 | 1,410,907 → 1,410,907 | 0 | 1,100,023 | 5 ms |
+| **合计** | **13 批** | **1,100,023** | — | **204,081 ms ≈ 204.1 s** |
 
 第 12/13 批是收尾：先取到剩余 23 行，再取一次空集确认到底，`while` 循环才退出——批次号天然递增且收尾干净。
 
-### 14.3 结论
+### 13.3 结论
 
 **① 线性度很好，100 万行量级没有劣化。**
 数据量放大 11 倍，单行耗时只从 0.180 ms 涨到 0.186 ms（+3.3%），吞吐仅下降 2.8%。说明 `setFetchSize(batchSize)` 的流式读取确实生效了——内存占用没有随数据量膨胀，全程没有 OOM、没有 GC 抖动。
@@ -406,7 +376,7 @@ missing_in_target = 0     -- 目标库缺失行数
 
 ---
 
-## 十五、Roadmap（二期规划）
+## 十四、Roadmap（二期规划）
 
 - [ ] DDL 同步（库表结构变更自动跟随）
 - [ ] 多线程极速同步（按主键区间分片并行）
@@ -417,7 +387,7 @@ missing_in_target = 0     -- 目标库缺失行数
 
 ---
 
-## 十六、写在最后
+## 十五、写在最后
 
 DataMove 不是一个万能 ETL 平台，它的定位非常清晰：
 
