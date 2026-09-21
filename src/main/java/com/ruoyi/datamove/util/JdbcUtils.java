@@ -159,6 +159,17 @@ public class JdbcUtils {
      * @return true=表已存在(或建表成功), false=失败
      */
     public static boolean ensureTableExists(SyncDatasource src, SyncDatasource tgt, String tableName) {
+        return ensureTableExists(src, tgt, tableName, null);
+    }
+
+    /**
+     * 同上, 但支持把 DDL 里的源字段名重命名为目标字段名 (用于"字段映射"场景自动建表)
+     * <p>只动 backtick 包起来的列名, 不会误伤表名/库名/索引名
+     *
+     * @param renameMap 源字段 -> 目标字段; 为 null/空 表示不重命名
+     */
+    public static boolean ensureTableExists(SyncDatasource src, SyncDatasource tgt, String tableName,
+                                            Map<String, String> renameMap) {
         if (tableName == null || tableName.isEmpty()) return false;
         // 防止注入 (虽然来源是配置)
         if (!tableName.matches("[A-Za-z0-9_]+")) {
@@ -180,11 +191,21 @@ public class JdbcUtils {
         String normalized = ddl.replaceFirst(
                 "(?i)CREATE\\s+TABLE\\s+(IF NOT EXISTS\\s+)?(`[^`]+`\\.)?`" + tableName + "`",
                 "CREATE TABLE IF NOT EXISTS `" + tableName + "`");
-        // 4. 在目标库执行
+        // 4. 字段映射: DDL 里出现的源列名替换为目标列名 (含列定义/索引引用)
+        if (renameMap != null && !renameMap.isEmpty()) {
+            for (Map.Entry<String, String> e : renameMap.entrySet()) {
+                String from = e.getKey();
+                String to = e.getValue();
+                if (from == null || from.isEmpty() || to == null || to.isEmpty()) continue;
+                if (from.equals(to)) continue;
+                normalized = normalized.replace("`" + from + "`", "`" + to + "`");
+            }
+        }
+        // 5. 在目标库执行
         try (Connection c = getConnection(tgt);
              Statement s = c.createStatement()) {
             s.executeUpdate(normalized);
-            log.info("[DDL] 自动建表成功 {}.{}", tgt.getDbName(), tableName);
+            log.info("[DDL] 自动建表成功 {}.{} (rename={})", tgt.getDbName(), tableName, renameMap == null ? 0 : renameMap.size());
             return true;
         } catch (SQLException e) {
             log.error("[DDL] 自动建表失败 {}.{} : {}", tgt.getDbName(), tableName, e.getMessage());

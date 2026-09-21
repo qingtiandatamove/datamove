@@ -59,6 +59,11 @@ export function taskProgress (id) { return request({ url: `/sync/task/${id}/prog
 /* 任务大盘: 进度 + 实时速率/ETA/当前批次/瓶颈库 */
 export function taskDashboard () { return request({ url: '/sync/task/dashboard', method: 'get' }) }
 
+/* 任务-字段映射 (源字段 -> 目标字段, FULL + INCR 都生效) */
+export function listFieldMapping (taskId) { return request({ url: `/sync/task/fieldMapping/list/${taskId}`, method: 'get' }) }
+export function saveFieldMapping (taskId, list) { return request({ url: `/sync/task/fieldMapping/save/${taskId}`, method: 'post', data: list }) }
+export function clearFieldMapping (taskId) { return request({ url: `/sync/task/fieldMapping/${taskId}`, method: 'delete' }) }
+
 /* ============ 日志 ============ */
 export function pageLog (params) { return request({ url: '/sync/log/page', method: 'get', params }) }
 export function exportLogUrl (params) {

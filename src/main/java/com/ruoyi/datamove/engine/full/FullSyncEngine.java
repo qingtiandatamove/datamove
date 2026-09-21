@@ -10,7 +10,9 @@ import com.ruoyi.datamove.engine.log.SyncLogService;
 import com.ruoyi.datamove.engine.metrics.TaskMetrics;
 import com.ruoyi.datamove.engine.metrics.TaskMetricsRegistry;
 import com.ruoyi.datamove.task.domain.SyncTask;
+import com.ruoyi.datamove.task.domain.SyncTaskFieldMapping;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
+import com.ruoyi.datamove.task.mapper.SyncTaskFieldMappingMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
 import com.ruoyi.datamove.util.JdbcUtils;
@@ -36,6 +38,7 @@ import java.util.concurrent.atomic.AtomicLong;
  *  3.2.1 全量同步任务 - 双同步模式 (按主键ID / 按时间)
  *  3.2.2 断点续传 - 整批写入成功才更新断点,失败自动重试
  *  3.2.3 幂等防重 - INSERT ... ON DUPLICATE KEY UPDATE
+ *  3.2.5 字段映射 - 源/目标字段名不同时按 sync_task_field_mapping 配置重命名同步
  *
  * 支持:
  *  - 启动/暂停/继续/终止
@@ -50,6 +53,7 @@ public class FullSyncEngine {
     private final SyncTaskMapper taskMapper;
     private final SyncTaskProgressMapper progressMapper;
     private final SyncDatasourceMapper datasourceMapper;
+    private final SyncTaskFieldMappingMapper fieldMappingMapper;
     private final SyncLogService logService;
     private final TaskMetricsRegistry metricsRegistry;
 
@@ -130,6 +134,10 @@ public class FullSyncEngine {
                 .pauseFlag(new AtomicBoolean(false))
                 .stopFlag(new AtomicBoolean(false))
                 .build();
+
+        // 字段映射: 启动时一次性加载, 后续 doMainLoop 不再查库
+        loadFieldMappings(ctx, task);
+
         RUNNING.put(taskId, ctx);
         RUNNING_TASK.add(taskId);
 
@@ -142,8 +150,8 @@ public class FullSyncEngine {
         progress.setUpdateTime(new Date());
         progressMapper.updateById(progress);
 
-        log.info("[Sync] task[{}] start, mode={}, table={}",
-                task.getTaskName(), task.getSyncMode(), task.getTableName());
+        log.info("[Sync] task[{}] start, mode={}, table={}, mappingEnabled={}",
+                task.getTaskName(), task.getSyncMode(), task.getTableName(), ctx.isMappingEnabled());
 
         final SyncContext fCtx = ctx;
         final Long fTaskId = taskId;
@@ -151,6 +159,34 @@ public class FullSyncEngine {
         Thread t = new Thread(() -> doMainLoop(fCtx, fProgress), "datamove-task-" + fTaskId);
         t.setDaemon(true);
         t.start();
+    }
+
+    /**
+     * 加载字段映射到 SyncContext (按 sort_no, id 升序)
+     * - 空配置 → orderedSourceFields/orderedTargetFields 留空 → 走同名兼容
+     * - 有配置 → 准备 srcFieldToTarget / orderedSourceFields / orderedTargetFields
+     */
+    private void loadFieldMappings(SyncContext ctx, SyncTask task) {
+        List<SyncTaskFieldMapping> mappings = fieldMappingMapper.selectList(
+                new QueryWrapper<SyncTaskFieldMapping>()
+                        .eq("task_id", task.getId())
+                        .orderByAsc("sort_no", "id"));
+        ctx.setFieldMappings(mappings);
+        if (mappings == null || mappings.isEmpty()) return;
+
+        Map<String, String> src2tgt = new LinkedHashMap<>();
+        List<String> srcList = new ArrayList<>();
+        List<String> tgtList = new ArrayList<>();
+        for (SyncTaskFieldMapping m : mappings) {
+            if (m == null || m.getSourceField() == null || m.getTargetField() == null) continue;
+            src2tgt.put(m.getSourceField(), m.getTargetField());
+            srcList.add(m.getSourceField());
+            tgtList.add(m.getTargetField());
+        }
+        ctx.setSrcFieldToTarget(src2tgt);
+        ctx.setOrderedSourceFields(srcList);
+        ctx.setOrderedTargetFields(tgtList);
+        log.info("[Sync] task[{}] 字段映射加载完成, 共 {} 条配对", task.getTaskName(), src2tgt.size());
     }
 
     /**
@@ -261,18 +297,27 @@ public class FullSyncEngine {
         String idField = task.getIdField() == null ? "id" : task.getIdField();
         int batchSize = task.getBatchSize() == null || task.getBatchSize() <= 0 ? 1000 : task.getBatchSize();
 
-        List<String> cols = ensureTargetTable(ctx, table);
-        if (cols.isEmpty()) throw new RuntimeException("目标表 " + table + " 无字段,请先建表");
+        // 字段映射模式下: idField 必须存在于源字段集里, 否则按源主键中断, 用源 idField
+        // 同名模式: idField 是目标表 id 列, 源里用同名取数
+        String srcIdField = idField;
+        if (ctx.isMappingEnabled()) {
+            // idField 看作「目标主键列」, 找它对应的源字段
+            String src = findSourceFieldByTarget(ctx, idField);
+            srcIdField = src == null ? idField : src;
+        }
 
-        String insertSql = buildInsertSql(table, cols);
-        String selectSql = "SELECT * FROM `" + table + "` WHERE `" + idField + "` > ? ORDER BY `" + idField + "` ASC LIMIT " + batchSize;
+        List<String> srcFields = ensureFields(ctx, table);
+        List<String> tgtFields = resolveTargetFields(ctx, srcFields);
+
+        String insertSql = buildInsertSql(table, tgtFields);
+        String selectSql = "SELECT " + joinBackticked(srcFields) + " FROM `" + table + "` WHERE `" + srcIdField + "` > ? ORDER BY `" + srcIdField + "` ASC LIMIT " + batchSize;
 
         long lastId = progress.getLastSyncMaxId() == null ? 0L : progress.getLastSyncMaxId();
         long totalRows = progress.getTotalRows() == null ? 0L : progress.getTotalRows();
 
-        try (Connection src = JdbcUtils.getConnection(ctx.getSource());
+        try (Connection srcConn = JdbcUtils.getConnection(ctx.getSource());
              Connection tgt = JdbcUtils.getConnection(ctx.getTarget());
-             PreparedStatement psSrc = src.prepareStatement(selectSql);
+             PreparedStatement psSrc = srcConn.prepareStatement(selectSql);
              PreparedStatement psTgt = tgt.prepareStatement(insertSql)) {
 
             tgt.setAutoCommit(false);
@@ -299,10 +344,12 @@ public class FullSyncEngine {
                 long readStartMs = System.currentTimeMillis();
                 try (ResultSet rs = psSrc.executeQuery()) {
                     while (rs.next()) {
-                        Object[] values = new Object[cols.size()];
-                        for (int i = 0; i < cols.size(); i++) values[i] = rs.getObject(cols.get(i));
+                        Object[] values = new Object[tgtFields.size()];
+                        for (int i = 0; i < srcFields.size(); i++) {
+                            values[i] = rs.getObject(srcFields.get(i));
+                        }
                         batchValues.add(values);
-                        Object idObj = rs.getObject(idField);
+                        Object idObj = rs.getObject(srcIdField);
                         if (idObj instanceof Number) {
                             long id = ((Number) idObj).longValue();
                             if (id > newMaxId) newMaxId = id;
@@ -378,23 +425,31 @@ public class FullSyncEngine {
         String timeField = task.getTimeField() == null ? "update_time" : task.getTimeField();
         int batchSize = task.getBatchSize() == null || task.getBatchSize() <= 0 ? 1000 : task.getBatchSize();
 
-        List<String> cols = ensureTargetTable(ctx, table);
-        if (cols.isEmpty()) throw new RuntimeException("目标表 " + table + " 无字段,请先建表");
+        // 字段映射: idField / timeField 是目标列名, 找到对应源列名
+        String srcIdField = idField;
+        String srcTimeField = timeField;
+        if (ctx.isMappingEnabled()) {
+            String src = findSourceFieldByTarget(ctx, idField);
+            srcIdField = src == null ? idField : src;
+            src = findSourceFieldByTarget(ctx, timeField);
+            srcTimeField = src == null ? timeField : src;
+        }
 
-        String insertSql = buildInsertSql(table, cols);
+        List<String> srcFields = ensureFields(ctx, table);
+        List<String> tgtFields = resolveTargetFields(ctx, srcFields);
+
+        String insertSql = buildInsertSql(table, tgtFields);
 
         // key 排序: 时间 ASC, ID ASC, 用于同秒拆分
-        String selectSql = "SELECT * FROM `" + table + "` WHERE `" + timeField + "` > ? " +
-                "OR (`" + timeField + "` = ? AND `" + idField + "` > ?) " +
-                "ORDER BY `" + timeField + "` ASC, `" + idField + "` ASC LIMIT " + batchSize;
+        String selectSql = "SELECT " + joinBackticked(srcFields) + " FROM `" + table + "` WHERE `" + srcTimeField + "` > ? OR (`" + srcTimeField + "` = ? AND `" + srcIdField + "` > ?) ORDER BY `" + srcTimeField + "` ASC, `" + srcIdField + "` ASC LIMIT " + batchSize;
 
         Date lastTime = progress.getLastSyncTime();
         Long lastIdInBatch = progress.getLastSyncMaxId();
         long totalRows = progress.getTotalRows() == null ? 0L : progress.getTotalRows();
 
-        try (Connection src = JdbcUtils.getConnection(ctx.getSource());
+        try (Connection srcConn = JdbcUtils.getConnection(ctx.getSource());
              Connection tgt = JdbcUtils.getConnection(ctx.getTarget());
-             PreparedStatement psSrc = src.prepareStatement(selectSql);
+             PreparedStatement psSrc = srcConn.prepareStatement(selectSql);
              PreparedStatement psTgt = tgt.prepareStatement(insertSql)) {
 
             tgt.setAutoCommit(false);
@@ -425,16 +480,18 @@ public class FullSyncEngine {
                 long readStartMs = System.currentTimeMillis();
                 try (ResultSet rs = psSrc.executeQuery()) {
                     while (rs.next()) {
-                        Object[] values = new Object[cols.size()];
-                        for (int i = 0; i < cols.size(); i++) values[i] = rs.getObject(cols.get(i));
+                        Object[] values = new Object[tgtFields.size()];
+                        for (int i = 0; i < srcFields.size(); i++) {
+                            values[i] = rs.getObject(srcFields.get(i));
+                        }
                         batchValues.add(values);
 
                         // 时间断点必须用 getTimestamp() 读取: MySQL 8 驱动 getObject() 对
                         // datetime 返回 LocalDateTime, instanceof Timestamp 判断会失效,
                         // 导致断点不推进、反复同步同一批数据。
                         // getTimestamp() 按连接时区换算, 与 MyBatis 读取 last_sync_time 口径一致。
-                        Timestamp rowTs = rs.getTimestamp(timeField);
-                        Object iObj = rs.getObject(idField);
+                        Timestamp rowTs = rs.getTimestamp(srcTimeField);
+                        Object iObj = rs.getObject(srcIdField);
                         Date rowTime = rowTs == null ? null : new Date(rowTs.getTime());
                         long rowId = iObj instanceof Number ? ((Number) iObj).longValue() : 0L;
 
@@ -465,7 +522,7 @@ public class FullSyncEngine {
                 // 读到数据但从数据里取不到时间值 => 断点无法推进, 继续跑只会反复同步同一批数据
                 if (newMaxTime == lastTime && newMaxIdInBatch == (lastIdInBatch == null ? 0L : lastIdInBatch)) {
                     tgt.rollback();
-                    throw new RuntimeException("时间字段 `" + timeField + "` 无法解析为时间类型, 请检查任务配置");
+                    throw new RuntimeException("时间字段 `" + srcTimeField + "` 无法解析为时间类型, 请检查任务配置");
                 }
 
                 long writeStartMs = System.currentTimeMillis();
@@ -515,21 +572,26 @@ public class FullSyncEngine {
 
     /* ============ Helpers ============ */
 
-    /**
-     * 估算本次运行还需同步的总行数, 仅用于大盘计算进度与 ETA
-     * <p>
-     * ID   模式: 源表中 id   > 断点 的行数;
-     * TIME 模式: 源表中 time > 断点 的行数(与断点同一时间戳的行会有少量高估, 作为估算可接受)。
-     * <p>
-     * COUNT(*) 在超大表上可能较慢, 因此只在任务线程里执行一次, 不阻塞启动接口。
-     *
-     * @return 估算行数, 无法估算时返回 -1
-     */
+    /** 估算本次运行还需同步的总行数, 仅用于大盘计算进度与 ETA */
     private long estimateTotalRows(SyncContext ctx, SyncTaskProgress progress) {
         SyncTask task = ctx.getTask();
         String table = task.getTableName();
         boolean byTime = SyncType.MODE_TIME.equals(task.getSyncMode());
-        String field = byTime ? task.getTimeField() : task.getIdField();
+        // 估算也要用源字段 (timeField/idField 可能是目标列名)
+        String field;
+        if (byTime) {
+            field = task.getTimeField() == null ? "update_time" : task.getTimeField();
+            if (ctx.isMappingEnabled()) {
+                String src = findSourceFieldByTarget(ctx, field);
+                field = src == null ? field : src;
+            }
+        } else {
+            field = task.getIdField() == null ? "id" : task.getIdField();
+            if (ctx.isMappingEnabled()) {
+                String src = findSourceFieldByTarget(ctx, field);
+                field = src == null ? field : src;
+            }
+        }
         if (table == null || table.isEmpty() || field == null || field.isEmpty()) return -1L;
 
         String sql = "SELECT COUNT(*) FROM `" + table + "` WHERE `" + field + "` > ?";
@@ -553,15 +615,64 @@ public class FullSyncEngine {
         }
     }
 
-    private String buildInsertSql(String table, List<String> cols) {
+    /** 拼接 `f1`,`f2`,... 用于 SELECT 列表 */
+    private static String joinBackticked(List<String> fields) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < fields.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append('`').append(fields.get(i)).append('`');
+        }
+        return sb.toString();
+    }
+
+    /**
+     * 解析"当前同步用的源/目标字段集"
+     * - 映射模式: 用 ctx.orderedSourceFields (目标自动由映射决定)
+     * - 同名模式: 取目标表实际列 (按 ORDINAL_POSITION), 同时 srcFields == tgtFields
+     */
+    private List<String> ensureFields(SyncContext ctx, String table) throws Exception {
+        if (ctx.isMappingEnabled()) {
+            // 映射模式: 源字段 = ctx.orderedSourceFields;
+            // 自动建表: 用 renameMap 复制源 DDL 到目标 (renameMap 内 src->tgt)
+            // 但仅当目标表不存在时才需要建表; 存在则跳过
+            SyncDatasource tgt = ctx.getTarget();
+            if (!isTableExists(tgt, table)) {
+                JdbcUtils.ensureTableExists(ctx.getSource(), tgt, table, ctx.getSrcFieldToTarget());
+            }
+            return ctx.getOrderedSourceFields();
+        } else {
+            return ensureTargetTable(ctx, table);
+        }
+    }
+
+    /** 由 srcFields 决定 tgtFields, 同名模式 = srcFields */
+    private List<String> resolveTargetFields(SyncContext ctx, List<String> srcFields) {
+        if (ctx.isMappingEnabled()) return ctx.getOrderedTargetFields();
+        return srcFields;
+    }
+
+    /**
+     * 字段映射模式下: 根据目标字段名反查源字段名 (idField/timeField 都是目标列名)
+     * 找不到时返回 null (调用方按目标列名原样查源表)
+     */
+    private String findSourceFieldByTarget(SyncContext ctx, String targetField) {
+        if (targetField == null) return null;
+        if (ctx.getSrcFieldToTarget() == null) return null;
+        for (Map.Entry<String, String> e : ctx.getSrcFieldToTarget().entrySet()) {
+            if (targetField.equals(e.getValue())) return e.getKey();
+        }
+        return null;
+    }
+
+    private String buildInsertSql(String table, List<String> tgtCols) {
         StringBuilder sb = new StringBuilder("INSERT INTO `").append(table).append("` (");
-        for (int i = 0; i < cols.size(); i++) sb.append("`").append(cols.get(i)).append("`").append(i < cols.size() - 1 ? "," : "");
+        for (int i = 0; i < tgtCols.size(); i++) sb.append("`").append(tgtCols.get(i)).append("`").append(i < tgtCols.size() - 1 ? "," : "");
         sb.append(") VALUES (");
-        for (int i = 0; i < cols.size(); i++) sb.append("?").append(i < cols.size() - 1 ? "," : "");
+        for (int i = 0; i < tgtCols.size(); i++) sb.append("?").append(i < tgtCols.size() - 1 ? "," : "");
         sb.append(") ON DUPLICATE KEY UPDATE ");
-        for (int i = 0; i < cols.size(); i++)
-            sb.append("`").append(cols.get(i)).append("`=VALUES(`").append(cols.get(i)).append("`)")
-              .append(i < cols.size() - 1 ? "," : "");
+        for (int i = 0; i < tgtCols.size(); i++)
+            sb.append("`").append(tgtCols.get(i)).append("`=VALUES(`").append(tgtCols.get(i)).append("`)")
+              .append(i < tgtCols.size() - 1 ? "," : "");
         return sb.toString();
     }
 
@@ -579,6 +690,21 @@ public class FullSyncEngine {
             cols = fetchTableColumns(tgt, tableName);
         }
         return cols;
+    }
+
+    private boolean isTableExists(SyncDatasource ds, String tableName) {
+        try (Connection c = JdbcUtils.getConnection(ds);
+             PreparedStatement ps = c.prepareStatement(
+                     "SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? LIMIT 1")) {
+            ps.setString(1, ds.getDbName());
+            ps.setString(2, tableName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        } catch (Exception e) {
+            log.warn("isTableExists failed: {}", e.getMessage());
+            return false;
+        }
     }
 
     private List<String> fetchTableColumns(SyncDatasource ds, String tableName) {

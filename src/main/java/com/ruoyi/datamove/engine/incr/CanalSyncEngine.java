@@ -15,8 +15,10 @@ import com.ruoyi.datamove.engine.metrics.TaskMetrics;
 import com.ruoyi.datamove.engine.metrics.TaskMetricsRegistry;
 import com.ruoyi.datamove.task.domain.SyncCanalPosition;
 import com.ruoyi.datamove.task.domain.SyncTask;
+import com.ruoyi.datamove.task.domain.SyncTaskFieldMapping;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.mapper.SyncCanalPositionMapper;
+import com.ruoyi.datamove.task.mapper.SyncTaskFieldMappingMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
 import com.ruoyi.datamove.util.JdbcUtils;
@@ -38,6 +40,8 @@ import java.util.concurrent.*;
  *  - 把 INSERT/UPDATE/DELETE 实时应用到目标库
  *  - Canal 自带 Offset 断点,持久化到 sync_canal_position
  *  - 异常自动钉钉告警,支持启停
+ *  - 字段映射支持: 把 rowdata 里的源列名按 sync_task_field_mapping 重命名后再写入目标
+ *    (未配对的列保持原名, 等同"老逻辑", 兼容老任务)
  */
 @Slf4j
 @Component
@@ -48,6 +52,7 @@ public class CanalSyncEngine {
     private final SyncTaskProgressMapper progressMapper;
     private final SyncDatasourceMapper   datasourceMapper;
     private final SyncCanalPositionMapper positionMapper;
+    private final SyncTaskFieldMappingMapper fieldMappingMapper;
     private final SyncLogService         logService;
     private final TaskMetricsRegistry    metricsRegistry;
 
@@ -57,14 +62,39 @@ public class CanalSyncEngine {
     /** 单条日志记录的数据内容上限(字符), 超出后不再拼接明细 */
     private static final int MAX_CONTENT_CHARS = 3500;
 
-    /** 构造增量批次日志上下文 */
+    /** 构造增量批次日志上下文 (含字段映射) */
     private SyncContext buildCtx(SyncTask task, SyncDatasource src, SyncDatasource tgt) {
-        return SyncContext.builder()
+        SyncContext ctx = SyncContext.builder()
                 .task(task).source(src).target(tgt)
                 .batchNo(new java.util.concurrent.atomic.AtomicLong(1))
                 .pauseFlag(new java.util.concurrent.atomic.AtomicBoolean(false))
                 .stopFlag(new java.util.concurrent.atomic.AtomicBoolean(false))
                 .build();
+        loadFieldMappings(ctx, task);
+        return ctx;
+    }
+
+    /** 启动时一次性加载映射, 与 FullSyncEngine 同样的解析逻辑 */
+    private void loadFieldMappings(SyncContext ctx, SyncTask task) {
+        List<SyncTaskFieldMapping> mappings = fieldMappingMapper.selectList(
+                new QueryWrapper<SyncTaskFieldMapping>()
+                        .eq("task_id", task.getId())
+                        .orderByAsc("sort_no", "id"));
+        ctx.setFieldMappings(mappings);
+        if (mappings == null || mappings.isEmpty()) return;
+        Map<String, String> src2tgt = new LinkedHashMap<>();
+        List<String> srcList = new ArrayList<>();
+        List<String> tgtList = new ArrayList<>();
+        for (SyncTaskFieldMapping m : mappings) {
+            if (m == null || m.getSourceField() == null || m.getTargetField() == null) continue;
+            src2tgt.put(m.getSourceField(), m.getTargetField());
+            srcList.add(m.getSourceField());
+            tgtList.add(m.getTargetField());
+        }
+        ctx.setSrcFieldToTarget(src2tgt);
+        ctx.setOrderedSourceFields(srcList);
+        ctx.setOrderedTargetFields(tgtList);
+        log.info("[IncrSync] task[{}] 字段映射加载完成, 共 {} 条配对", task.getTaskName(), src2tgt.size());
     }
 
     /** 启动增量同步 */
@@ -181,11 +211,11 @@ public class CanalSyncEngine {
 
         /**
          * 记录一行变更内容,供界面"同步内容"展示
-         *  - INSERT/DELETE: 列出全部字段
+         *  - INSERT/DELETE: 列出全部字段 (按映射后的目标名)
          *  - UPDATE: 先给主键,再只列出真正发生变化的字段
          */
         private void appendContent(StringBuilder sb, String op, List<CanalEntry.Column> after,
-                                   List<CanalEntry.Column> before) {
+                                   List<CanalEntry.Column> before, SyncContext ctx) {
             if (sb.length() >= MAX_CONTENT_CHARS) return;
             sb.append(op);
             if ("UPDATE".equals(op)) {
@@ -232,6 +262,30 @@ public class CanalSyncEngine {
             return def;
         }
 
+        /**
+         * 字段映射: 把 canal rowdata 里的源列名替换为目标列名
+         * - 未配对的列保持原名 (等同"老逻辑"), 避免与目标表无关的字段出错
+         * - 主键列也要按映射改 (否则 DELETE 找不到目标行)
+         */
+        private List<CanalEntry.Column> remapColumns(SyncContext ctx, List<CanalEntry.Column> cols) {
+            if (!ctx.isMappingEnabled() || cols == null || cols.isEmpty()) return cols;
+            Map<String, String> map = ctx.getSrcFieldToTarget();
+            List<CanalEntry.Column> out = new ArrayList<>(cols.size());
+            for (CanalEntry.Column c : cols) {
+                String newName = map.getOrDefault(c.getName(), c.getName());
+                CanalEntry.Column.Builder b = CanalEntry.Column.newBuilder()
+                        .setName(newName)
+                        .setIsKey(c.getIsKey())
+                        .setIsNull(c.getIsNull())
+                        .setMysqlType(c.getMysqlType())
+                        .setIndex(c.getIndex());
+                if (!c.getIsNull()) b.setValue(c.getValue());
+                if (c.hasUpdated()) b.setUpdated(c.getUpdated());
+                out.add(b.build());
+            }
+            return out;
+        }
+
         @Override
         public void run() {
             String tableName = task.getTableName();
@@ -251,6 +305,7 @@ public class CanalSyncEngine {
                 }
 
                 SyncContext ctx = buildCtx(task, src, tgt);
+                log.info("[IncrSync] task[{}] mappingEnabled={}", task.getTaskName(), ctx.isMappingEnabled());
                 TaskMetrics metrics = metricsRegistry.get(task.getId());
                 int batchNo = 0;
                 while (running) {
@@ -303,17 +358,21 @@ public class CanalSyncEngine {
                             for (CanalEntry.RowData rd : rowChange.getRowDatasList()) {
                                 try {
                                     if (type == CanalEntry.EventType.INSERT) {
-                                        applyInsert(tgt, table, rd.getAfterColumnsList());
+                                        applyInsert(tgt, table, ctx, rd.getAfterColumnsList());
                                         inserts++;
-                                        appendContent(contentSb, "INSERT", rd.getAfterColumnsList(), null);
+                                        appendContent(contentSb, "INSERT",
+                                                remapColumns(ctx, rd.getAfterColumnsList()), null, ctx);
                                     } else if (type == CanalEntry.EventType.UPDATE) {
-                                        applyUpdate(tgt, table, rd.getAfterColumnsList());
+                                        applyUpdate(tgt, table, ctx, rd.getAfterColumnsList());
                                         updates++;
-                                        appendContent(contentSb, "UPDATE", rd.getAfterColumnsList(), rd.getBeforeColumnsList());
+                                        appendContent(contentSb, "UPDATE",
+                                                remapColumns(ctx, rd.getAfterColumnsList()),
+                                                remapColumns(ctx, rd.getBeforeColumnsList()), ctx);
                                     } else if (type == CanalEntry.EventType.DELETE) {
-                                        applyDelete(tgt, table, rd.getBeforeColumnsList());
+                                        applyDelete(tgt, table, ctx, rd.getBeforeColumnsList());
                                         deletes++;
-                                        appendContent(contentSb, "DELETE", rd.getBeforeColumnsList(), null);
+                                        appendContent(contentSb, "DELETE",
+                                                remapColumns(ctx, rd.getBeforeColumnsList()), null, ctx);
                                     }
                                 } catch (Exception e) {
                                     errs++;
@@ -420,23 +479,26 @@ public class CanalSyncEngine {
             }
         }
 
-        /* ============ DML 应用 ============ */
+        /* ============ DML 应用 (支持映射重写 column name) ============ */
 
-        private void applyInsert(SyncDatasource ds, String table, List<CanalEntry.Column> cols) throws Exception {
+        private void applyInsert(SyncDatasource ds, String table, SyncContext ctx,
+                                 List<CanalEntry.Column> rawCols) throws Exception {
+            // 按字段映射重写列名 (不破坏数据, 仅改列名)
+            List<CanalEntry.Column> cols = remapColumns(ctx, rawCols);
+
             StringBuilder sql = new StringBuilder("INSERT INTO `").append(table).append("` (");
-            List<CanalEntry.Column> list = cols;
-            for (int i = 0; i < list.size(); i++) sql.append("`").append(list.get(i).getName()).append("`").append(i < list.size() - 1 ? "," : "");
+            for (int i = 0; i < cols.size(); i++) sql.append("`").append(cols.get(i).getName()).append("`").append(i < cols.size() - 1 ? "," : "");
             sql.append(") VALUES (");
-            for (int i = 0; i < list.size(); i++) sql.append("?").append(i < list.size() - 1 ? "," : "");
+            for (int i = 0; i < cols.size(); i++) sql.append("?").append(i < cols.size() - 1 ? "," : "");
             sql.append(") ON DUPLICATE KEY UPDATE ");
-            for (int i = 0; i < list.size(); i++)
-                sql.append("`").append(list.get(i).getName()).append("`=VALUES(`").append(list.get(i).getName()).append("`)")
-                   .append(i < list.size() - 1 ? "," : "");
+            for (int i = 0; i < cols.size(); i++)
+                sql.append("`").append(cols.get(i).getName()).append("`=VALUES(`").append(cols.get(i).getName()).append("`)")
+                   .append(i < cols.size() - 1 ? "," : "");
 
             try (Connection c = JdbcUtils.getConnection(ds);
                  PreparedStatement ps = c.prepareStatement(sql.toString())) {
-                for (int i = 0; i < list.size(); i++) {
-                    CanalEntry.Column col = list.get(i);
+                for (int i = 0; i < cols.size(); i++) {
+                    CanalEntry.Column col = cols.get(i);
                     // Canal 对 NULL 列返回的是空串,必须显式 setNull,
                     // 否则 int/decimal/datetime 等列会报 "Incorrect integer value: ''"
                     if (col.getIsNull()) {
@@ -449,12 +511,17 @@ public class CanalSyncEngine {
             }
         }
 
-        private void applyUpdate(SyncDatasource ds, String table, List<CanalEntry.Column> cols) throws Exception {
+        private void applyUpdate(SyncDatasource ds, String table, SyncContext ctx,
+                                 List<CanalEntry.Column> rawCols) throws Exception {
             // 文档未强制要求幂等,这里为简化复用 INSERT,注意 Update 用 REPLACE 更合理
-            applyInsert(ds, table, cols);
+            applyInsert(ds, table, ctx, rawCols);
         }
 
-        private void applyDelete(SyncDatasource ds, String table, List<CanalEntry.Column> cols) throws Exception {
+        private void applyDelete(SyncDatasource ds, String table, SyncContext ctx,
+                                 List<CanalEntry.Column> rawCols) throws Exception {
+            // 字段映射: PK 列名也要重命名 (源 PK 列名 -> 目标 PK 列名)
+            List<CanalEntry.Column> cols = remapColumns(ctx, rawCols);
+
             // 取主键的简化: 取第一个 key=PRI 的列
             CanalEntry.Column pk = null;
             for (CanalEntry.Column c : cols) if (c.getIsKey()) { pk = c; break; }
@@ -465,6 +532,10 @@ public class CanalSyncEngine {
             String sql = "DELETE FROM `" + table + "` WHERE `" + pk.getName() + "` = ?";
             try (Connection c = JdbcUtils.getConnection(ds);
                  PreparedStatement ps = c.prepareStatement(sql)) {
+                if (pk.getIsNull()) {
+                    log.warn("[IncrSync] pk is null, skip delete");
+                    return;
+                }
                 ps.setObject(1, pk.getValue());
                 ps.executeUpdate();
             }
