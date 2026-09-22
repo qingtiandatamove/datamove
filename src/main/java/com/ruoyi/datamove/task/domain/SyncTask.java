@@ -53,6 +53,13 @@ public class SyncTask extends BaseEntity implements Serializable {
     /** 并行分片数: 1=单线程串行(默认); >1=FULL+ID 模式按主键区间分片并行, 大表提速 */
     private Integer shardCount;
 
+    /**
+     * 数据校验忽略字段: 逗号分隔(目标列名), 校验时不比较这些列。
+     * 目标库由 DB 自动维护的列(update_time / ON UPDATE CURRENT_TIMESTAMP)天然与源库不同,
+     * 不配忽略会刷出满屏假差异。
+     */
+    private String ignoreFields;
+
     /** 是否覆盖数据: 1=启动时先清空目标表再全量同步 (仅 FULL 任务生效) */
     private Integer overwriteFlag;
 

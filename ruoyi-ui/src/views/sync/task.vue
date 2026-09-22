@@ -65,43 +65,48 @@
         <el-table-column prop="createTime" label="创建时间" width="170" sortable="custom" :sort-orders="['descending','ascending']">
           <template slot-scope="s">{{ fmtTime(s.row.createTime) }}</template>
         </el-table-column>
-        <!-- 操作列: 按钮平铺, 通过去 icon + CSS 收紧 padding 减少宽度; 列宽按 FULL/INCR 8 按钮自然宽 -->
-        <el-table-column label="操作" min-width="470">
+        <!-- 操作列: 外面只留高频动作(状态动作/停止/数据校验), 低频与危险动作收进「更多」下拉, 不再平铺 9 个按钮 -->
+        <el-table-column label="操作" min-width="300" fixed="right">
           <template slot-scope="s">
             <!-- DDL 类型: 单次操作, 不支持暂停/继续/停止 -->
             <template v-if="s.row.taskType === 'DDL'">
               <el-button size="mini" type="success"
                 :disabled="s.row.status === 'RUNNING'"
-                @click="onStart(s.row)" icon="el-icon-document-add">
+                @click="onStart(s.row)">
                 {{ s.row.status === 'COMPLETED' ? '再次同步' : (s.row.status === 'FAILED' ? '重试' : '同步表结构') }}
               </el-button>
-              <el-button size="mini" @click="onLog(s.row)">日志</el-button>
-              <el-button size="mini" type="danger" plain @click="onClearTaskLog(s.row)">清日志</el-button>
-              <el-button size="mini" type="primary" @click="onEdit(s.row)">编辑</el-button>
-              <el-button size="mini" type="danger" @click="onDel(s.row)">删除</el-button>
             </template>
             <template v-else>
-              <!-- 启动: 运行中禁用; 完成/未启动/暂停/失败 都可点 (文案随状态变化) -->
-              <el-button size="mini" type="success"
-                :disabled="s.row.status === 'RUNNING'"
-                @click="onStart(s.row)">
+              <!-- 状态动作: 同一时刻只会出现一个 —— 运行中=暂停 / 已暂停=继续 / 其余=启动(文案随状态变化) -->
+              <el-button v-if="s.row.status === 'RUNNING'" size="mini" @click="onPause(s.row)">暂停</el-button>
+              <el-button v-else-if="s.row.status === 'PAUSE'" size="mini" type="warning" @click="onResume(s.row)">继续</el-button>
+              <el-button v-else size="mini" type="success" @click="onStart(s.row)">
                 {{ s.row.status === 'COMPLETED' ? '重新启动' : (s.row.status === 'FAILED' ? '重试' : '启动') }}
               </el-button>
-              <!-- 暂停: 仅运行中可点 -->
-              <el-button size="mini" :disabled="s.row.status !== 'RUNNING'" @click="onPause(s.row)">暂停</el-button>
-              <!-- 继续: 仅已暂停可点 -->
-              <el-button size="mini" type="warning" :disabled="s.row.status !== 'PAUSE'" @click="onResume(s.row)">继续</el-button>
               <!-- 停止: 运行中或暂停可点 -->
-              <el-button size="mini" type="danger" :disabled="!['RUNNING','PAUSE'].includes(s.row.status)" @click="onStop(s.row)">停止</el-button>
-              <!-- 重置: 仅 FULL 任务, 运行中不可重置 -->
-              <el-button size="mini" type="info"
-                :disabled="s.row.status === 'RUNNING'"
-                @click="onReset(s.row)">重置</el-button>
-              <el-button size="mini" @click="onLog(s.row)">日志</el-button>
-              <el-button size="mini" type="danger" plain @click="onClearTaskLog(s.row)">清日志</el-button>
-              <el-button size="mini" type="primary" @click="onEdit(s.row)">编辑</el-button>
-              <el-button size="mini" type="danger" @click="onDel(s.row)">删除</el-button>
+              <el-button size="mini" type="danger" plain
+                :disabled="!['RUNNING','PAUSE'].includes(s.row.status)"
+                @click="onStop(s.row)">停止</el-button>
+              <!-- 数据校验: 比对源库与目标库, 展示差异并可一键同步缺失数据 -->
+              <el-button size="mini" type="primary" plain @click="onOpenVerify(s.row)">数据校验</el-button>
             </template>
+
+            <!-- 低频/危险动作收进下拉: 重置进度 / 日志 / 清日志 / 编辑 / 删除 -->
+            <el-dropdown trigger="click" @command="onRowCommand($event, s.row)">
+              <el-button size="mini" class="op-more">
+                更多<i class="el-icon-arrow-down el-icon--right"></i>
+              </el-button>
+              <el-dropdown-menu slot="dropdown">
+                <el-dropdown-item v-if="s.row.taskType !== 'DDL'" command="reset"
+                  icon="el-icon-refresh-left" :disabled="s.row.status === 'RUNNING'">重置进度</el-dropdown-item>
+                <el-dropdown-item command="log" icon="el-icon-tickets">查看日志</el-dropdown-item>
+                <el-dropdown-item command="clearLog" icon="el-icon-delete-solid">清理日志</el-dropdown-item>
+                <el-dropdown-item command="edit" icon="el-icon-edit" divided>编辑任务</el-dropdown-item>
+                <el-dropdown-item command="del" icon="el-icon-delete" divided>
+                  <span class="op-danger">删除任务</span>
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </el-dropdown>
           </template>
         </el-table-column>
       </el-table>
@@ -193,6 +198,14 @@
                 description="启动后会把源表结构复制到目标库; 目标表不存在会自动建表, 已存在则跳过 (不会覆盖现有数据)。"/>
             </template>
 
+            <!-- 数据校验忽略字段: 目标库自动维护的列天然与源库不同, 不忽略会刷满假差异 -->
+            <el-form-item v-if="form.taskType !== 'DDL'" label="校验忽略字段">
+              <el-input v-model="form.ignoreFields" placeholder="逗号分隔, 如 update_time,update_by" />
+              <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                点「数据校验」比对源库与目标库时不比较这些列 (填目标列名)。<br/>
+                数据库自动维护的列 (update_time / ON UPDATE CURRENT_TIMESTAMP) 两边天然不同, 建议填上。
+              </div>
+            </el-form-item>
             <el-form-item label="钉钉告警"><el-input v-model="form.dingtalkWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx" /></el-form-item>
             <el-form-item label="邮件告警">
               <el-input v-model="form.alertEmail" placeholder="多个邮箱用英文逗号分隔, 如 ops@a.com,dev@b.com" />
@@ -348,6 +361,90 @@
         <el-button type="danger" icon="el-icon-delete" :loading="clearing" @click="onClearConfirm">确认清理</el-button>
       </div>
     </el-dialog>
+
+    <!-- 数据校验抽屉: 比对进度 + 差异明细 + 一键同步缺失数据 -->
+    <el-drawer :title="verifyTitle" :visible.sync="verifyDrawer" size="75%" @closed="onVerifyClosed">
+      <div style="padding:0 20px 24px">
+        <div style="margin-bottom:12px">
+          <el-button type="primary" icon="el-icon-search" size="small"
+            :loading="verifyStarting" :disabled="verifyRunning" @click="onStartVerify">开始校验</el-button>
+          <el-button type="danger" plain size="small" :disabled="!verifyRunning" @click="onStopVerify">中止校验</el-button>
+          <el-button type="success" icon="el-icon-refresh" size="small" :disabled="!canRepair" @click="onRepair">
+            一键同步差异
+          </el-button>
+          <el-button size="small" :disabled="!verifyRecord" @click="loadVerifyDiffs">刷新差异</el-button>
+        </div>
+
+        <el-alert v-if="!verifyRecord" type="info" :closable="false" show-icon
+          title="还没有校验记录"
+          description="点「开始校验」比对源库与目标库的行级差异。校验全程只读源库, 不修改任何数据。" />
+
+        <template v-else>
+          <div style="margin-bottom:12px">
+            <el-tag size="small" style="margin:0 6px 6px 0" :type="verifyStatusTag(verifyRecord.status)">
+              {{ verifyStatusName(verifyRecord.status) }}
+            </el-tag>
+            <el-tag size="small" style="margin:0 6px 6px 0" type="info">
+              <i v-if="verifyRunning" class="el-icon-loading"></i>
+              已比对 {{ verifyRecord.checkedRows || 0 }} 行
+            </el-tag>
+            <el-tag size="small" style="margin:0 6px 6px 0">
+              源 {{ verifyRecord.sourceRows || 0 }} / 目标 {{ verifyRecord.targetRows || 0 }}
+            </el-tag>
+            <el-tag size="small" style="margin:0 6px 6px 0" type="danger">缺失 {{ verifyRecord.missingRows || 0 }}</el-tag>
+            <el-tag size="small" style="margin:0 6px 6px 0" type="warning">不一致 {{ verifyRecord.mismatchRows || 0 }}</el-tag>
+            <el-tag size="small" style="margin:0 6px 6px 0" type="info">多余 {{ verifyRecord.extraRows || 0 }}</el-tag>
+            <el-tag v-if="verifyRecord.repairStatus" size="small" style="margin:0 6px 6px 0" type="success">
+              修复 {{ verifyRecord.repairedRows || 0 }} / 失败 {{ verifyRecord.repairFailedRows || 0 }}
+            </el-tag>
+            <el-tag v-if="verifyRecord.truncated === 1" size="small" style="margin:0 6px 6px 0" type="danger">
+              差异过多, 仅保留前 {{ verifyRecord.savedDiffs }} 条明细
+            </el-tag>
+          </div>
+
+          <el-alert v-if="verifyRecord.errorMsg" type="error" :closable="false" show-icon
+            :title="verifyRecord.errorMsg" style="margin-bottom:10px" />
+
+          <div style="color:#909399;font-size:12px;line-height:20px;margin-bottom:10px">
+            <b>缺失</b> = 源库有、目标库没有 → 一键同步会 INSERT;<br>
+            <b>不一致</b> = 两边都有但字段值不同 → 一键同步只 UPDATE 不一致的字段;<br>
+            <b>多余</b> = 目标库有、源库没有 → 只展示, 不会删除目标库数据。
+          </div>
+
+          <div style="margin-bottom:8px">
+            <el-radio-group v-model="verifyDiffQuery.diffType" size="mini" @change="onDiffFilterChange">
+              <el-radio-button label="">全部</el-radio-button>
+              <el-radio-button label="MISSING">缺失</el-radio-button>
+              <el-radio-button label="MISMATCH">不一致</el-radio-button>
+              <el-radio-button label="EXTRA">多余</el-radio-button>
+            </el-radio-group>
+          </div>
+
+          <el-table :data="verifyDiffPage.rows" v-loading="verifyDiffLoading" border size="mini" max-height="430">
+            <el-table-column prop="diffType" label="类型" width="90">
+              <template slot-scope="s">
+                <el-tag size="mini" :type="verifyTypeTag(s.row.diffType)">{{ verifyTypeName(s.row.diffType) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="pkValue" label="主键值" width="140" show-overflow-tooltip />
+            <el-table-column prop="diffFields" label="不一致字段" min-width="150" show-overflow-tooltip />
+            <el-table-column prop="sourceRow" label="源行" min-width="230" show-overflow-tooltip />
+            <el-table-column prop="targetRow" label="目标行" min-width="230" show-overflow-tooltip />
+            <el-table-column prop="repairStatus" label="修复" width="90">
+              <template slot-scope="s">
+                <el-tag size="mini" :type="repairStatusTag(s.row.repairStatus)">{{ repairStatusName(s.row.repairStatus) }}</el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column prop="repairError" label="失败原因" min-width="150" show-overflow-tooltip />
+          </el-table>
+
+          <el-pagination
+            style="margin-top:12px" background layout="prev, pager, next, total"
+            :total="verifyDiffPage.total" :page-size="verifyDiffQuery.pageSize"
+            :current-page.sync="verifyDiffQuery.pageNum" @current-change="loadVerifyDiffs" />
+        </template>
+      </div>
+    </el-drawer>
   </div>
 </template>
 
@@ -356,7 +453,9 @@ import { pageTask, addTask, updateTask, deleteTask,
          startTask, pauseTask, resumeTask, stopTask, resetTask, pageLog,
          clearTaskLog, clearLogByFilter,
          listDataSource, listTables, listColumns,
-         listFieldMapping, saveFieldMapping, clearFieldMapping } from '@/api/datamove'
+         listFieldMapping, saveFieldMapping, clearFieldMapping,
+         startVerify, verifyDetail, latestVerify, verifyDiffs,
+         repairVerify, stopVerify } from '@/api/datamove'
 
 export default {
   data () {
@@ -364,7 +463,7 @@ export default {
       query: { keyword: '', taskType: '', status: '', pageNum: 1, pageSize: 10, orderByColumn: 'id', isAsc: 'asc' },
       page: { rows: [], total: 0 },
       loading: false, dialog: false, saving: false,
-      form: { taskType: 'FULL', syncMode: 'ID', batchSize: 1000 },
+      form: { taskType: 'FULL', syncMode: 'ID', batchSize: 1000, ignoreFields: '' },
       rules: {
         taskName: [{ required: true, message: '必填' }],
         taskType: [{ required: true }],
@@ -395,7 +494,22 @@ export default {
       // 拖拽临时状态 (hoverName = 当前悬停的目标字段, 命中测试结果)
       drag: { active: false, startX: 0, startY: 0, curX: 0, curY: 0, srcName: '', hoverName: '', path: '' },
       // 已保存的映射原始列表 (用于保存前检测变化)
-      originalMappings: []
+      originalMappings: [],
+
+      /* ============ 数据校验 (差异对账 + 一键同步) ============ */
+      verifyDrawer: false,
+      // 当前正在校验的任务行
+      verifyTask: null,
+      // 当前展示的校验记录 (sync_task_verify)
+      verifyRecord: null,
+      verifyStarting: false,
+      verifyDiffPage: { rows: [], total: 0 },
+      verifyDiffQuery: { pageNum: 1, pageSize: 20, diffType: '' },
+      verifyDiffLoading: false,
+      // 校验/修复期间轮询进度
+      verifyTimer: null,
+      // 校验轮询连续失败次数: 连续失败就停轮询, 避免无意义地一直打接口
+      verifyFailCount: 0
     }
   },
   computed: {
@@ -404,6 +518,25 @@ export default {
              '不建立映射 = 按源/目标字段同名同步(原行为, 老任务不受影响)。' +
              '支持部分映射: 只同步已连线配对的字段, 未连线字段不同步(断点字段未连线时自动补读, 不写入目标)。' +
              '建立后: SELECT 按源字段读、INSERT 按目标字段写, 自动建表也会用目标列名(未映射列放宽为可空)。'
+    },
+    verifyTitle () {
+      return this.verifyTask ? ('数据校验 - ' + this.verifyTask.taskName) : '数据校验'
+    },
+    verifyRunning () {
+      return !!this.verifyRecord && this.verifyRecord.status === 'RUNNING'
+    },
+    /**
+     * 有待修复差异、且当前既不在校验也不在修复中时, 才允许点「一键同步差异」
+     * 修复只能基于已落库的差异明细 —— 差异超过落库上限时, 超出部分只统计不落明细
+     */
+    canRepair () {
+      const v = this.verifyRecord
+      if (!v || !v.id) return false
+      if (v.status === 'RUNNING' || v.repairStatus === 'RUNNING') return false
+      if ((v.missingRows || 0) + (v.mismatchRows || 0) <= 0) return false
+      const fixable = Math.min(Number(v.diffRows || 0), Number(v.savedDiffs || 0))
+      const done = Number(v.repairedRows || 0) + Number(v.repairFailedRows || 0)
+      return done < fixable
     }
   },
   watch: {
@@ -432,12 +565,145 @@ export default {
   },
   beforeDestroy () {
     this.stopPolling()
+    this.stopVerifyTimer()
     window.removeEventListener('mousemove', this.onDocMouseMove)
     window.removeEventListener('mouseup', this.onDocMouseUp)
     window.removeEventListener('resize', this.onWinResize)
     document.body.classList.remove('fm-dragging')
   },
   methods: {
+    /* ==================== 数据校验 (差异对账 + 一键同步) ==================== */
+
+    /** 打开校验抽屉: 先展示最近一次结果(用户多半只是想看上次差异), 要重跑再点开始校验 */
+    onOpenVerify (row) {
+      this.verifyTask = row
+      this.verifyRecord = null
+      this.verifyDiffPage = { rows: [], total: 0 }
+      this.verifyDiffQuery = { pageNum: 1, pageSize: 20, diffType: '' }
+      this.verifyDrawer = true
+      // 抽屉打开期间暂停列表自动刷新: 用户在盯校验结果, 列表不必每 3s 再打一次 /sync/task/page
+      this.stopPolling()
+      latestVerify(row.id).then(r => {
+        if (r.data) {
+          this.verifyRecord = r.data
+          this.loadVerifyDiffs()
+          // 上次还没跑完(或正在修复), 接着轮询
+          if (r.data.status === 'RUNNING' || r.data.repairStatus === 'RUNNING') this.startVerifyTimer()
+        }
+      }).catch(() => {})
+    },
+    onStartVerify () {
+      if (!this.verifyTask) return
+      this.verifyStarting = true
+      startVerify(this.verifyTask.id).then(r => {
+        this.$message.success('已开始校验, 大表需要一些时间')
+        this.verifyRecord = { id: r.data, status: 'RUNNING', checkedRows: 0, missingRows: 0, mismatchRows: 0, extraRows: 0 }
+        this.verifyDiffPage = { rows: [], total: 0 }
+        this.verifyDiffQuery.pageNum = 1
+        this.startVerifyTimer()
+        this.pollVerify()
+      }).catch(err => {
+        this.$message.error('校验启动失败:' + (err.message || ''))
+      }).finally(() => { this.verifyStarting = false })
+    },
+    onStopVerify () {
+      if (!this.verifyRecord || !this.verifyRecord.id) return
+      stopVerify(this.verifyRecord.id).then(() => this.$message.success('已请求中止校验')).catch(() => {})
+    },
+    /**
+     * 一键同步差异: 把「缺失」补上、「不一致」的字段改对。
+     * 弹窗里明确写清不删目标库数据 —— 删除是破坏性动作, 不能藏在这个按钮背后。
+     */
+    onRepair () {
+      const v = this.verifyRecord
+      if (!v || !v.id) return
+      const msg = '将以源库为准修复目标库:\n' +
+        '  补缺失 ' + (v.missingRows || 0) + ' 行 (INSERT)\n' +
+        '  修不一致 ' + (v.mismatchRows || 0) + ' 行 (UPDATE 差异字段)\n\n' +
+        '不会删除目标库的任何数据。确认执行?'
+      this.$confirm(msg, '一键同步差异', { type: 'warning', confirmButtonText: '确认同步' }).then(() => {
+        return repairVerify(v.id)
+      }).then(() => {
+        this.$message.success('已开始修复')
+        this.startVerifyTimer()
+        this.pollVerify()
+      }).catch(() => {})
+    },
+    pollVerify () {
+      const id = this.verifyRecord && this.verifyRecord.id
+      // 没有校验记录了(抽屉已关闭/切走): 停掉定时器, 别留个空转的
+      if (!id) { this.stopVerifyTimer(); return }
+      verifyDetail(id).then(r => {
+        const data = r && r.data
+        // 记录查不到(已被清理/接口不返回数据): 没有可轮询的对象, 停
+        if (!data) { this.stopVerifyTimer(); return }
+        this.verifyFailCount = 0
+        const prev = this.verifyRecord
+        this.verifyRecord = data
+        // 校验刚跑完 -> 拉一次差异明细
+        if (prev && prev.status === 'RUNNING' && data.status !== 'RUNNING') {
+          this.verifyDiffQuery.pageNum = 1
+          this.loadVerifyDiffs()
+        }
+        // 修复过程中持续刷新明细的修复状态
+        if (prev && prev.repairStatus === 'RUNNING') this.loadVerifyDiffs()
+        // 校验完成(含失败/中止)、修复也不在跑 -> 停掉校验轮询
+        // 这里不要顺手 refreshTasks(): 校验只读, 不改任务状态, 列表没必要求刷新,
+        // 否则每完成一次校验就会多打一次 /sync/task/page
+        if (data.status !== 'RUNNING' && data.repairStatus !== 'RUNNING') {
+          this.stopVerifyTimer()
+        }
+      }).catch(() => {
+        // 接口连续失败: 直接停, 否则每 2s 空打接口永远停不下来
+        this.verifyFailCount = (this.verifyFailCount || 0) + 1
+        if (this.verifyFailCount >= 5) this.stopVerifyTimer()
+      })
+    },
+    startVerifyTimer () {
+      this.stopVerifyTimer()
+      this.verifyFailCount = 0
+      this.verifyTimer = setInterval(() => this.pollVerify(), 2000)
+    },
+    stopVerifyTimer () {
+      if (this.verifyTimer) { clearInterval(this.verifyTimer); this.verifyTimer = null }
+    },
+    onDiffFilterChange () {
+      this.verifyDiffQuery.pageNum = 1
+      this.loadVerifyDiffs()
+    },
+    loadVerifyDiffs () {
+      const id = this.verifyRecord && this.verifyRecord.id
+      if (!id) return
+      this.verifyDiffLoading = true
+      verifyDiffs(id, this.verifyDiffQuery).then(r => { this.verifyDiffPage = r.data })
+        .catch(() => {}).finally(() => { this.verifyDiffLoading = false })
+    },
+    onVerifyClosed () {
+      this.stopVerifyTimer()
+      this.verifyTask = null
+      this.verifyRecord = null
+      // 抽屉关了, 恢复列表自动刷新(仍是有「运行中」的行才真的发请求)
+      this.startPolling()
+    },
+    verifyStatusName (s) {
+      return ({ RUNNING: '校验中', COMPLETED: '校验完成', FAILED: '校验失败', STOP: '已中止' })[s] || s || '-'
+    },
+    verifyStatusTag (s) {
+      return ({ RUNNING: 'warning', COMPLETED: 'success', FAILED: 'danger', STOP: 'info' })[s] || 'info'
+    },
+    verifyTypeName (t) {
+      return ({ MISSING: '缺失', MISMATCH: '不一致', EXTRA: '多余' })[t] || t
+    },
+    verifyTypeTag (t) {
+      return ({ MISSING: 'danger', MISMATCH: 'warning', EXTRA: 'info' })[t] || 'info'
+    },
+    repairStatusName (s) {
+      return ({ PENDING: '待修复', REPAIRED: '已修复', FAILED: '失败', SKIPPED: '不修复' })[s] || s || '-'
+    },
+    repairStatusTag (s) {
+      return ({ PENDING: 'info', REPAIRED: 'success', FAILED: 'danger', SKIPPED: 'info' })[s] || 'info'
+    },
+
     load () {
       this.loading = true
       pageTask(this.query).then(r => { this.page = r.data }).catch(() => {}).finally(() => this.loading = false)
@@ -571,6 +837,21 @@ export default {
             console.error('[reset]', err.message || err)
           }
         })
+    },
+
+    /**
+     * 操作列「更多」下拉的分发: 低频/危险动作集中在模板里配置, 这里按 command 落到对应方法
+     */
+    onRowCommand (act, row) {
+      const handlers = {
+        reset: 'onReset',
+        log: 'onLog',
+        clearLog: 'onClearTaskLog',
+        edit: 'onEdit',
+        del: 'onDel'
+      }
+      const fn = handlers[act] && this[handlers[act]]
+      if (typeof fn === 'function') fn(row)
     },
 
     /**
@@ -848,20 +1129,32 @@ function cssEscape (s) {
 </script>
 
 <style scoped>
-/* 同步任务列表 - 操作列按钮紧凑 */
-.sync-task-table >>> .el-table .cell .el-button--mini {
+/* 同步任务列表 - 操作列
+   坑: .sync-task-table 就是 el-table 根节点本身(同一个元素挂两个类), 根节点的后代里没有 .el-table,
+   所以深选择器后面不能再写 .el-table —— 写了永远不匹配, 紧凑样式会整体失效 */
+.sync-task-table >>> .cell .el-button--mini {
   padding: 5px 8px;
   font-size: 12px;
 }
-.sync-task-table >>> .el-table td:last-child .cell {
+/* 低频动作已收进「更多」下拉, 这列不再需要平铺撑满, 改成左对齐; 间距统一交给 gap */
+.sync-task-table >>> td:last-child .cell {
   display: flex;
   flex-wrap: nowrap;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
+  gap: 8px;
   white-space: nowrap;
   padding-left: 8px;
   padding-right: 8px;
 }
+/* 去掉 element-ui 默认的相邻按钮 10px 左边距, 否则会叠加在 gap 上 */
+.sync-task-table >>> td:last-child .cell .el-button + .el-button { margin-left: 0; }
+/* 「更多」是二级入口: gap 之外再留 6px, 与动作按钮略作区分(合计 14px) */
+.sync-task-table >>> td:last-child .cell .el-dropdown { margin-left: 6px; }
+/* 「更多」是次要入口, 不抢主按钮的视觉 */
+.sync-task-table >>> td:last-child .op-more { color: #606266; }
+/* 下拉里的危险动作 */
+.op-danger { color: #F56C6C; }
 
 /* ============ 字段映射 - kettle 风格 ============ */
 .fm-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px }

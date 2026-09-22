@@ -83,6 +83,19 @@ export function listFieldMapping (taskId) { return request({ url: `/sync/task/fi
 export function saveFieldMapping (taskId, list) { return request({ url: `/sync/task/fieldMapping/save/${taskId}`, method: 'post', data: list }) }
 export function clearFieldMapping (taskId) { return request({ url: `/sync/task/fieldMapping/${taskId}`, method: 'delete' }) }
 
+/* ============ 数据校验 (差异对账 + 一键修复) ============ */
+/* 校验要全表扫源+目标, 耗时可能很长, 所以 start 只返回 verifyId, 进度由前端轮询 verifyDetail */
+export function startVerify (taskId) { return request({ url: `/sync/verify/start/${taskId}`, method: 'post' }) }
+export function verifyDetail (verifyId) { return request({ url: `/sync/verify/${verifyId}`, method: 'get' }) }
+export function latestVerify (taskId) { return request({ url: `/sync/verify/latest/${taskId}`, method: 'get' }) }
+export function verifySummary (verifyId) { return request({ url: `/sync/verify/${verifyId}/summary`, method: 'get' }) }
+export function verifyDiffs (verifyId, params) { return request({ url: `/sync/verify/${verifyId}/diffs`, method: 'get', params }) }
+export function verifyDiffList (verifyId, diffType) { return request({ url: `/sync/verify/${verifyId}/diffList`, method: 'get', params: { diffType } }) }
+/* 一键同步差异: 补缺失 + 修不一致 (不动目标库多余行) */
+export function repairVerify (verifyId) { return request({ url: `/sync/verify/${verifyId}/repair`, method: 'post' }) }
+export function stopVerify (verifyId) { return request({ url: `/sync/verify/${verifyId}/stop`, method: 'post' }) }
+export function stopRepairVerify (verifyId) { return request({ url: `/sync/verify/${verifyId}/repair/stop`, method: 'post' }) }
+
 /* ============ 日志 ============ */
 export function pageLog (params) { return request({ url: '/sync/log/page', method: 'get', params }) }
 /* 按当前筛选条件统计(条数/行数/耗时/异常数) */

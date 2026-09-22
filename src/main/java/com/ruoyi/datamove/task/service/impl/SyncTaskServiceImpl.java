@@ -129,6 +129,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setBatchSize(t.getBatchSize());
         db.setShardCount(t.getShardCount() == null ? 1 : Math.max(1, t.getShardCount()));
         db.setOverwriteFlag(t.getOverwriteFlag() == null ? 0 : t.getOverwriteFlag());
+        // 数据校验忽略字段: 这里是逐字段白名单赋值, 漏一行配置就永远存不进去
+        db.setIgnoreFields(t.getIgnoreFields());
         db.setDingtalkWebhook(t.getDingtalkWebhook());
         db.setAlertEmail(t.getAlertEmail());
         db.setCanalHost(t.getCanalHost());
