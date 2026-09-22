@@ -105,6 +105,16 @@ public class JdbcUtils {
     }
 
     /**
+     * 无缓存新连接: 多线程分片并行时使用。
+     * ConnectionCache 每数据源仅缓存 1 条共享连接, JDBC Connection 非线程安全,
+     * 并发线程各自调本方法拿独立连接, 互不干扰。
+     */
+    public static Connection newConnection(SyncDatasource ds) throws SQLException {
+        return DriverManager.getConnection(buildUrl(ds.getHost(), ds.getPort(), ds.getDbName()),
+                ds.getUsername(), ds.getPlainPassword());
+    }
+
+    /**
      * 列出数据库中所有表
      */
     public static List<String> listTables(SyncDatasource ds) {

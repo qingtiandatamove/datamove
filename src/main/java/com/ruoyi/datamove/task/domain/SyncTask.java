@@ -50,6 +50,9 @@ public class SyncTask extends BaseEntity implements Serializable {
     @NotNull
     private Integer batchSize;
 
+    /** 并行分片数: 1=单线程串行(默认); >1=FULL+ID 模式按主键区间分片并行, 大表提速 */
+    private Integer shardCount;
+
     /** 是否覆盖数据: 1=启动时先清空目标表再全量同步 (仅 FULL 任务生效) */
     private Integer overwriteFlag;
 

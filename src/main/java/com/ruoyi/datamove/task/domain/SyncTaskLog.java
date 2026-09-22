@@ -25,6 +25,8 @@ public class SyncTaskLog implements Serializable {
     private String syncMode;
 
     private Integer batchNo;
+    /** 分片号(1 起); null = 非分片任务/协调线程日志 */
+    private Integer shardNo;
     private String batchStartId;
     private String batchEndId;
     private Integer batchRows;

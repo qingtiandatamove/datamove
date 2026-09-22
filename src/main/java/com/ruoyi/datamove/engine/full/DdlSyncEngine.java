@@ -122,7 +122,7 @@ public class DdlSyncEngine {
                     task.getTaskName(), tgt.getDbName(), table);
             logService.writeLog(
                     buildCtx(task, src, tgt), 1, table, table,
-                    0, 0, 0, SyncType.LOG_SUCCESS,
+                    0, 0, 0, SyncType.LOG_SUCCESS, null,
                     "目标表已存在, 跳过建表 (DDL 同步默认不覆盖)");
             return;
         }
@@ -148,7 +148,7 @@ public class DdlSyncEngine {
                     task.getTaskName(), tgt.getDbName(), table, cost);
             logService.writeLog(
                     buildCtx(task, src, tgt), 1, table, table,
-                    0, 0, cost, SyncType.LOG_SUCCESS,
+                    0, 0, cost, SyncType.LOG_SUCCESS, null,
                     "DDL 已应用: " + truncate(normalized, 500));
         } catch (Exception e) {
             log.error("[DDL] task[{}] 执行 DDL 失败: {}", task.getTaskName(), e.getMessage());

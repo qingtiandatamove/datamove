@@ -82,9 +82,28 @@
                   <i class="el-icon-question" />
                 </el-tooltip>
               </span>
+              <span v-if="t.shardCount > 1">分片 <b>{{ t.shardCount }}</b></span>
               <span>平均 {{ fmtRate(t.avgRowsPerSec) }} 行/秒</span>
               <span>失败 {{ num(t.failedRows) }}</span>
               <span v-if="t.costSeconds != null">已运行 {{ fmtDuration(t.costSeconds) }}</span>
+            </div>
+
+            <!-- 分片实时监控 -->
+            <div v-if="t.shards && t.shards.length" class="shards">
+              <div class="shards-title">
+                分片监控
+                <el-tooltip placement="top" content="每个分片负责一段主键区间, 独立线程并行读写; DONE=该分片区间已同步完, FAILED=该分片异常">
+                  <i class="el-icon-question" />
+                </el-tooltip>
+              </div>
+              <div class="shard-row" v-for="s in t.shards" :key="s.shardNo" :class="{ failed: s.state === 'FAILED', done: s.state === 'DONE' }">
+                <span class="s-no">S{{ s.shardNo }}</span>
+                <span class="s-range" :title="'主键区间 ' + s.rangeLo + ' ~ ' + s.rangeHi">{{ num(s.rangeLo) }} ~ {{ num(s.rangeHi) }}</span>
+                <span class="s-cur" :title="'游标当前位置'">→ {{ num(s.currentId) }}</span>
+                <span class="s-rows">{{ num(s.rows) }} 行</span>
+                <span class="s-rate">{{ fmtRate(s.rowsPerSec) }}/s</span>
+                <el-tag size="mini" :type="shardStateTag(s.state)">{{ shardStateName(s.state) }}</el-tag>
+              </div>
             </div>
 
             <div class="mon-actions">
@@ -128,6 +147,12 @@
         </el-table-column>
         <el-table-column label="实时速率" width="110" align="right">
           <template slot-scope="s">{{ fmtRate(s.row.rowsPerSec) }}</template>
+        </el-table-column>
+        <el-table-column label="分片" width="70" align="center">
+          <template slot-scope="s">
+            <el-tag v-if="s.row.shardCount > 1" size="mini" type="warning" effect="plain">{{ s.row.shardCount }}</el-tag>
+            <span v-else class="muted">—</span>
+          </template>
         </el-table-column>
         <el-table-column label="瓶颈" width="100">
           <template slot-scope="s">{{ s.row.bottleneckText || '—' }}</template>
@@ -248,7 +273,9 @@ export default {
     statusType (s) { return ({ STOP: 'info', RUNNING: 'success', PAUSE: 'warning', COMPLETED: '', FAILED: 'danger' })[s] || '' },
     taskTypeName (t) { return ({ FULL: '全量', INCR: '增量', DDL: '表结构' })[t] || t },
     taskTypeTag (t) { return ({ FULL: '', INCR: 'success', DDL: 'warning' })[t] || '' },
-    bottleneckTag (b) { return ({ SOURCE: 'warning', TARGET: 'danger', BALANCED: 'success' })[b] || 'info' }
+    bottleneckTag (b) { return ({ SOURCE: 'warning', TARGET: 'danger', BALANCED: 'success' })[b] || 'info' },
+    shardStateName (s) { return ({ RUNNING: '同步中', DONE: '已完成', FAILED: '失败' })[s] || s },
+    shardStateTag (s) { return ({ RUNNING: 'primary', DONE: 'success', FAILED: 'danger' })[s] || 'info' }
   }
 }
 </script>
@@ -297,4 +324,34 @@ export default {
 }
 .mon-foot b { color: #606266; font-weight: 600 }
 .mon-actions { margin-top: 10px; text-align: right }
+
+/* 分片实时监控 */
+.shards {
+  margin-top: 10px; padding-top: 8px;
+  border-top: 1px dashed #ebeef5;
+}
+.shards-title {
+  color: #909399; font-size: 12px; margin-bottom: 6px;
+  display: flex; align-items: center; gap: 4px;
+}
+.shard-row {
+  display: flex; align-items: center; gap: 10px;
+  font-size: 12px; color: #606266;
+  padding: 3px 8px; border-radius: 3px;
+  font-family: Menlo, Consolas, monospace;
+}
+.shard-row:nth-child(even) { background: #fafafa }
+.shard-row.failed { background: #fef0f0 }
+.shard-row.done { opacity: 0.65 }
+.shard-row .s-no {
+  flex: none; width: 28px; font-weight: 600; color: #409EFF;
+}
+.shard-row .s-range {
+  flex: 1; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.shard-row .s-cur { flex: none; color: #909399 }
+.shard-row .s-rows { flex: none; min-width: 90px; text-align: right }
+.shard-row .s-rate { flex: none; min-width: 70px; text-align: right; color: #303133; font-weight: 600 }
+.shard-row .el-tag { flex: none; margin-left: auto }
 </style>

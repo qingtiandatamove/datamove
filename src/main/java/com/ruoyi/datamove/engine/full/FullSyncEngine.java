@@ -262,7 +262,11 @@ public class FullSyncEngine {
         SyncTask task = ctx.getTask();
         try {
             if (SyncType.MODE_ID.equalsIgnoreCase(task.getSyncMode())) {
-                doSyncById(ctx, progress);
+                if (shouldShard(task, progress)) {
+                    doShardedSync(ctx, progress);
+                } else {
+                    doSyncById(ctx, progress);
+                }
             } else if (SyncType.MODE_TIME.equalsIgnoreCase(task.getSyncMode())) {
                 doSyncByTime(ctx, progress);
             } else {
@@ -291,6 +295,294 @@ public class FullSyncEngine {
     }
 
     /* ============ 按主键ID同步 ============ */
+
+    /* ------------------------------------------------------------
+     * 大数据分片并行同步 (shard_count > 1 时启用)
+     *
+     * 策略:
+     *  - 按 MIN/MAX(主键) 均分 id 区间 (主键索引上聚合, 代价极小)
+     *  - 每个分片独立线程 + 独立源/目标连接并行读 写
+     *  - 区间互不重叠, INSERT ... ON DUPLICATE KEY UPDATE 天然无冲突
+     *  - 进度/断点聚合写 sync_task_progress; 大盘吞吐 = 各分片之和
+     *
+     * 适用: 覆盖式全量 (overwrite=1) 或首次全量 (无历史断点)。
+     * 存在断点的续传任务自动回退单线程, 保证游标语义不变。
+     * 暂停后 resume 会整体重跑 (幂等写, 无脏数据, 代价是重新拉一遍)。
+     * ------------------------------------------------------------ */
+
+    /** 是否走分片并行 */
+    private boolean shouldShard(SyncTask task, SyncTaskProgress progress) {
+        int sc = task.getShardCount() == null ? 1 : task.getShardCount();
+        if (sc <= 1) return false;
+        if (!SyncType.MODE_ID.equalsIgnoreCase(task.getSyncMode())) return false;
+        long done = progress.getTotalRows() == null ? 0L : progress.getTotalRows();
+        if (done > 0) {
+            log.info("[Sync] task[{}] 已有断点(累计 {} 行), 分片并行回退单线程续传", task.getTaskName(), done);
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 按主键 MIN/MAX 均分为 shardCount 个 [lo, hi] 区间。
+     * 稀疏主键(大量空洞)时分片行数不均, 自增主键下最均匀。
+     * 空表/异常时返回空列表, 调用方回退单线程。
+     */
+    private List<long[]> splitByIdRange(SyncContext ctx, String table, String idField, int shardCount) {
+        List<long[]> ranges = new ArrayList<>();
+        String sql = "SELECT MIN(`" + idField + "`), MAX(`" + idField + "`) FROM `" + table + "`";
+        try (Connection c = JdbcUtils.getConnection(ctx.getSource());
+             Statement st = c.createStatement();
+             ResultSet rs = st.executeQuery(sql)) {
+            if (!rs.next()) return ranges;
+            Object minO = rs.getObject(1);
+            Object maxO = rs.getObject(2);
+            if (!(minO instanceof Number) || !(maxO instanceof Number)) return ranges;
+            long min = ((Number) minO).longValue();
+            long max = ((Number) maxO).longValue();
+            long width = (max - min) / shardCount + 1;
+            if (width <= 0) {
+                ranges.add(new long[]{min, max});
+                return ranges;
+            }
+            for (int k = 0; k < shardCount; k++) {
+                long lo = min + (long) k * width;
+                if (lo > max) break;
+                long hi = k == shardCount - 1 ? max : Math.min(lo + width - 1, max);
+                ranges.add(new long[]{lo, hi});
+            }
+        } catch (Exception e) {
+            log.warn("[Sync] task[{}] 分片区间划分失败, 回退单线程: {}", ctx.getTask().getTaskName(), e.getMessage());
+        }
+        return ranges;
+    }
+
+    /** 分片并行主流程 (跑在任务主线程上, join 等待全部分片结束) */
+    private void doShardedSync(SyncContext ctx, SyncTaskProgress progress) throws Exception {
+        SyncTask task = ctx.getTask();
+        String table = task.getTableName();
+        String idField = task.getIdField() == null ? "id" : task.getIdField();
+        int batchSize = task.getBatchSize() == null || task.getBatchSize() <= 0 ? 1000 : task.getBatchSize();
+        int shardCount = task.getShardCount();
+
+        // 字段/映射/自动建表: 与单线程一致, 协调线程做一次即可
+        List<String> srcFields = ensureFields(ctx, table);
+        List<String> tgtFields = resolveTargetFields(ctx, srcFields);
+        String srcIdField = idField;
+        if (ctx.isMappingEnabled()) {
+            String src = findSourceFieldByTarget(ctx, idField);
+            srcIdField = src == null ? idField : src;
+        }
+        // lambda 捕获要求 effectively final
+        final String fSrcIdField = srcIdField;
+        // 部分字段映射: 断点字段(主键)未映射也要进 SELECT
+        List<String> selectFields = withBreakpointFields(srcFields, srcIdField);
+        String selectCols = joinBackticked(selectFields);
+        String insertSql = buildInsertSql(table, tgtFields);
+
+        List<long[]> ranges = splitByIdRange(ctx, table, srcIdField, shardCount);
+        if (ranges.isEmpty()) {
+            log.info("[Sync] task[{}] 空表或划分失败, 走单线程路径", task.getTaskName());
+            doSyncById(ctx, progress);
+            return;
+        }
+        if (ranges.size() == 1) {
+            log.info("[Sync] task[{}] 数据量不足以分片, 走单线程路径", task.getTaskName());
+            doSyncById(ctx, progress);
+            return;
+        }
+
+        // 起始ID约束: 分片下界不低于任务配置的 startId
+        long startId = task.getStartId() == null ? 0L : task.getStartId();
+        for (long[] r : ranges) if (r[0] < startId) r[0] = startId;
+
+        // 大盘: 总量估算 + 分片区间注册(实时分片监控)
+        TaskMetrics metrics = metricsRegistry.get(task.getId());
+        if (metrics != null) {
+            metrics.setTotalEstimate(estimateTotalRows(ctx, progress));
+            metrics.registerShards(ranges);
+        }
+
+        log.info("[Sync] task[{}] 分片并行启动: {} 分片, batchSize={}, 区间示例 [{} , {}] ~ [{} , {}]",
+                task.getTaskName(), ranges.size(), batchSize,
+                ranges.get(0)[0], ranges.get(0)[1],
+                ranges.get(ranges.size() - 1)[0], ranges.get(ranges.size() - 1)[1]);
+        // 启动说明属正常信息, 写入「同步内容」而非「异常信息」
+        logService.writeLog(ctx, null, 0, "SPLIT", ranges.size() + "分片",
+                0, 0, 0L, SyncType.LOG_SUCCESS, null,
+                "分片并行启动: " + ranges.size() + " 个分片, batchSize=" + batchSize
+                        + ", 区间 " + describeRanges(ranges));
+
+        // 跨分片共享状态
+        final Object progressLock = new Object();
+        final AtomicLong totalRowsAll = new AtomicLong(progress.getTotalRows() == null ? 0L : progress.getTotalRows());
+        final AtomicLong globalMaxId = new AtomicLong(progress.getLastSyncMaxId() == null ? 0L : progress.getLastSyncMaxId());
+        final AtomicBoolean anyFailed = new AtomicBoolean(false);
+        final List<String> fSrcFields = srcFields;
+        final List<String> fTgtFields = tgtFields;
+
+        List<Thread> threads = new ArrayList<>(ranges.size());
+        for (int k = 0; k < ranges.size(); k++) {
+            final int shardNo = k + 1;
+            final long lo = ranges.get(k)[0];
+            final long hi = ranges.get(k)[1];
+            final String selectSql = "SELECT " + selectCols + " FROM `" + table
+                    + "` WHERE `" + fSrcIdField + "` >= ? AND `" + fSrcIdField + "` <= ? AND `" + fSrcIdField
+                    + "` > ? ORDER BY `" + fSrcIdField + "` ASC LIMIT " + batchSize;
+            Thread t = new Thread(() ->
+                    runShard(ctx, progress, shardNo, lo, hi, selectSql, insertSql,
+                            fSrcFields, fTgtFields, fSrcIdField, batchSize,
+                            progressLock, totalRowsAll, globalMaxId, anyFailed),
+                    "datamove-task-" + task.getId() + "-shard" + shardNo);
+            t.setDaemon(true);
+            threads.add(t);
+            t.start();
+        }
+        for (Thread t : threads) t.join();
+
+        if (anyFailed.get()) {
+            throw new RuntimeException("存在失败分片, 已终止本次同步, 详见同步日志 (重启任务将整体重跑)");
+        }
+        if (ctx.isPaused()) {
+            // 分片模式无逐分片断点, 暂停 = 进度作废; resume 走 start 重新分片 (幂等写无脏数据)
+            progress.setLastSyncMaxId(startId);
+            progress.setTotalRows(0L);
+            progress.setSuccessRows(0L);
+            progress.setFailedRows(0L);
+            progress.setUpdateTime(new Date());
+            progressMapper.updateById(progress);
+            updatePaused(task, progress);
+            return;
+        }
+        if (ctx.isStopped()) {
+            updateStopped(task, progress);
+            return;
+        }
+        complete(task, progress, globalMaxId.get());
+    }
+
+    /** 单个分片: 区间 [lo, hi] 内按游标分批拉取写入, 逻辑与 doSyncById 一致 */
+    private void runShard(SyncContext ctx, SyncTaskProgress progress, int shardNo,
+                          long lo, long hi, String selectSql, String insertSql,
+                          List<String> srcFields, List<String> tgtFields, String srcIdField, int batchSize,
+                          Object progressLock, AtomicLong totalRowsAll, AtomicLong globalMaxId,
+                          AtomicBoolean anyFailed) {
+        SyncTask task = ctx.getTask();
+        String tag = "[S" + shardNo + "]";
+        long lastId = lo;
+        TaskMetrics metrics = metricsRegistry.get(task.getId());
+        try (Connection srcConn = JdbcUtils.newConnection(ctx.getSource());
+             Connection tgt = JdbcUtils.newConnection(ctx.getTarget());
+             PreparedStatement psSrc = srcConn.prepareStatement(selectSql);
+             PreparedStatement psTgt = tgt.prepareStatement(insertSql)) {
+
+            tgt.setAutoCommit(false);
+            psSrc.setFetchSize(batchSize);
+
+            while (!ctx.isStopped() && !ctx.isPaused()) {
+                psSrc.setLong(1, lo);
+                psSrc.setLong(2, hi);
+                psSrc.setLong(3, lastId);
+                long startMs = System.currentTimeMillis();
+                int batchNo = (int) ctx.getBatchNo().incrementAndGet();
+                int batchRows = 0;
+                long newMaxId = lastId;
+                List<Object[]> batchValues = new ArrayList<>();
+                if (metrics != null) metrics.beginBatch(batchNo, batchSize);
+
+                long readStartMs = System.currentTimeMillis();
+                try (ResultSet rs = psSrc.executeQuery()) {
+                    while (rs.next()) {
+                        Object[] values = new Object[srcFields.size()];
+                        for (int i = 0; i < srcFields.size(); i++) {
+                            values[i] = rs.getObject(srcFields.get(i));
+                        }
+                        batchValues.add(values);
+                        Object idObj = rs.getObject(srcIdField);
+                        if (idObj instanceof Number) {
+                            long id = ((Number) idObj).longValue();
+                            if (id > newMaxId) newMaxId = id;
+                        }
+                        batchRows++;
+                        if (metrics != null) metrics.readRows(batchRows);
+                    }
+                }
+                long readMs = System.currentTimeMillis() - readStartMs;
+
+                if (batchRows == 0) {
+                    // 本分片到头
+                    tgt.commit();
+                    if (metrics != null) metrics.shardDone(shardNo);
+                    logService.writeLog(ctx, shardNo, batchNo, tag + "EOF", String.valueOf(hi),
+                            0, totalRowsAll.get(), System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
+                    return;
+                }
+
+                long writeStartMs = System.currentTimeMillis();
+                try {
+                    for (Object[] v : batchValues) {
+                        for (int i = 0; i < v.length; i++) psTgt.setObject(i + 1, v[i]);
+                        psTgt.addBatch();
+                    }
+                    psTgt.executeBatch();
+                    tgt.commit();
+                    if (metrics != null) metrics.finishBatch(batchRows, readMs,
+                            System.currentTimeMillis() - writeStartMs, System.currentTimeMillis() - startMs);
+                    if (metrics != null) metrics.shardFinishBatch(shardNo, batchRows, newMaxId,
+                            System.currentTimeMillis() - startMs);
+
+                    long prevId = lastId;
+                    lastId = newMaxId;
+                    // 聚合进度: 断点取全局最大 id, 行数累加
+                    synchronized (progressLock) {
+                        long total = totalRowsAll.addAndGet(batchRows);
+                        progress.setLastSyncMaxId(Math.max(
+                                progress.getLastSyncMaxId() == null ? 0L : progress.getLastSyncMaxId(), newMaxId));
+                        globalMaxId.accumulateAndGet(newMaxId, Math::max);
+                        progress.setTotalRows(total);
+                        progress.setSuccessRows((progress.getSuccessRows() == null ? 0L : progress.getSuccessRows()) + batchRows);
+                        progress.setUpdateTime(new Date());
+                        progressMapper.updateById(progress);
+                        logService.writeLog(ctx, shardNo, batchNo, tag + prevId, tag + lastId, batchRows, total,
+                                System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
+                    }
+                } catch (BatchUpdateException bue) {
+                    tgt.rollback();
+                    if (metrics != null) metrics.finishBatch(0, readMs,
+                            System.currentTimeMillis() - writeStartMs, System.currentTimeMillis() - startMs);
+                    synchronized (progressLock) {
+                        progress.setFailedRows((progress.getFailedRows() == null ? 0L : progress.getFailedRows()) + batchRows);
+                        progress.setUpdateTime(new Date());
+                        progressMapper.updateById(progress);
+                        logService.writeLog(ctx, shardNo, batchNo, tag + String.valueOf(lastId),
+                                tag + String.valueOf(newMaxId), batchRows, totalRowsAll.get(),
+                                System.currentTimeMillis() - startMs, SyncType.LOG_FAILED, bue.getMessage());
+                    }
+                    lastId = newMaxId; // 部分失败继续推进 (与单线程语义一致)
+                }
+            }
+            tgt.commit();
+        } catch (Exception e) {
+            log.error("[Sync] task[{}] {} 分片异常: {}", task.getTaskName(), tag, e.getMessage(), e);
+            anyFailed.set(true);
+            if (metrics != null) metrics.shardFailed(shardNo, e.getMessage());
+            // 快速失败: 让其他分片尽快退出, 整体按 FAILED 处理
+            ctx.requestStop();
+            logService.writeLog(ctx, shardNo, -1, tag + "FAIL", tag + String.valueOf(hi),
+                    0, totalRowsAll.get(), 0L, SyncType.LOG_FAILED,
+                    tag + " 分片异常: " + e.getMessage());
+        }
+    }
+
+    /** 分片区间摘要 (日志用) */
+    private static String describeRanges(List<long[]> ranges) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < ranges.size(); i++) {
+            if (i > 0) sb.append("; ");
+            sb.append('[').append(ranges.get(i)[0]).append(',').append(ranges.get(i)[1]).append(']');
+        }
+        return sb.toString();
+    }
 
     private void doSyncById(SyncContext ctx, SyncTaskProgress progress) throws Exception {
         SyncTask task = ctx.getTask();

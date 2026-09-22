@@ -24,6 +24,12 @@
       <el-table-column prop="taskName" label="任务名称" />
       <el-table-column prop="tableName" label="表" />
       <el-table-column prop="batchNo" label="批次" width="60" />
+      <el-table-column label="分片" width="70" align="center">
+        <template slot-scope="s">
+          <el-tag v-if="s.row.shardNo" size="mini" type="warning" effect="plain">S{{ s.row.shardNo }}</el-tag>
+          <span v-else class="empty-cell">-</span>
+        </template>
+      </el-table-column>
       <el-table-column prop="batchStartId" label="起" width="130" show-overflow-tooltip />
       <el-table-column prop="batchEndId" label="止" width="130" show-overflow-tooltip />
       <el-table-column prop="batchRows" label="行数" width="80" />
@@ -64,7 +70,7 @@
           <span class="d-label">执行结果</span>
           <span>
             <el-tag size="mini" :type="detail.status === 'SUCCESS' ? 'success' : 'danger'">{{ detail.status }}</el-tag>
-            <span class="d-meta">第 {{ detail.batchNo }} 批 · 本批 {{ detail.batchRows }} 行 · 累计 {{ detail.totalRows }} 行 · 耗时 {{ detail.costMs }}ms</span>
+            <span class="d-meta">第 {{ detail.batchNo }} 批 · {{ detail.shardNo ? '分片 S' + detail.shardNo + ' · ' : '' }}本批 {{ detail.batchRows }} 行 · 累计 {{ detail.totalRows }} 行 · 耗时 {{ detail.costMs }}ms</span>
           </span>
         </div>
         <div class="d-row"><span class="d-label">位点</span><span class="d-ua">{{ detail.batchStartId }} ~ {{ detail.batchEndId }}</span></div>

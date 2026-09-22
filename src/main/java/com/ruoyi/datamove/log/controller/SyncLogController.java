@@ -64,7 +64,7 @@ public class SyncLogController {
                 URLEncoder.encode("sync_log.csv", "UTF-8"));
 
         try (OutputStream os = response.getOutputStream()) {
-            StringBuilder sb = new StringBuilder("ID,任务ID,任务名称,表名,同步模式,批次号,起始,结束,行数,累计行数,耗时ms,状态,异常信息,同步内容,创建时间\n");
+            StringBuilder sb = new StringBuilder("ID,任务ID,任务名称,表名,同步模式,批次号,分片号,起始,结束,行数,累计行数,耗时ms,状态,异常信息,同步内容,创建时间\n");
             for (SyncTaskLog l : list) {
                 sb.append(l.getId()).append(',')
                         .append(l.getTaskId()).append(',')
@@ -72,6 +72,7 @@ public class SyncLogController {
                         .append(safe(l.getTableName())).append(',')
                         .append(safe(l.getSyncMode())).append(',')
                         .append(l.getBatchNo()).append(',')
+                        .append(l.getShardNo() == null ? "" : "S" + l.getShardNo()).append(',')
                         .append(safe(l.getBatchStartId())).append(',')
                         .append(safe(l.getBatchEndId())).append(',')
                         .append(l.getBatchRows()).append(',')

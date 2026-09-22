@@ -4,6 +4,7 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
 
 /**
  * 任务大盘条目: 任务 + 断点进度 + 运行期实时指标
@@ -27,6 +28,9 @@ public class TaskDashboardVO implements Serializable {
     private String targetName;
 
     private Integer batchSize;
+
+    /** 配置的并行分片数, null/1 = 单线程 */
+    private Integer shardCount;
 
     /* ---------- 进度 ---------- */
     /** 本次运行已同步行数(续传场景已扣除启动前的历史累计) */
@@ -68,4 +72,32 @@ public class TaskDashboardVO implements Serializable {
     private String bottleneck;
     /** 瓶颈的可读文本, 未知时为 null */
     private String bottleneckText;
+
+    /* ---------- 分片实时监控 (仅分片任务) ---------- */
+    /** 各分片实时状态, 按分片号升序; null/空 = 非分片任务 */
+    private List<ShardVO> shards;
+
+    /**
+     * 单个分片的实时状态
+     */
+    @Data
+    public static class ShardVO implements Serializable {
+        /** 分片号 (1 起) */
+        private Integer shardNo;
+        /** 分片负责的主键区间 [rangeLo, rangeHi] */
+        private Long rangeLo;
+        private Long rangeHi;
+        /** 本分片已同步行数 */
+        private Long rows;
+        /** 本分片游标当前位置(最近一批的最大 id) */
+        private Long currentId;
+        /** 本分片实时速率(行/秒, 10s 窗口) */
+        private Double rowsPerSec;
+        /** 本分片已完成批次数 */
+        private Integer batches;
+        /** RUNNING / DONE / FAILED */
+        private String state;
+        /** 失败原因(仅 FAILED 时) */
+        private String error;
+    }
 }

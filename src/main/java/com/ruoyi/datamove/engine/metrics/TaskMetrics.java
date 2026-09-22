@@ -3,7 +3,13 @@ package com.ruoyi.datamove.engine.metrics;
 import lombok.Getter;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Deque;
+import java.util.List;
+import java.util.Map;
+import java.util.TreeMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 单个同步任务的实时运行指标 (纯内存, 不落库)
@@ -90,6 +96,136 @@ public class TaskMetrics {
     @Getter
     private volatile String compareMode = MODE_FULL;
 
+    /* ============================================================
+     *                     分片并行实时状态
+     * 仅分片任务(shard_count > 1)使用; 单线程任务该 map 为空。
+     * 每个 shard 独立线程写入自己的条目, 大盘按需读取快照。
+     * ============================================================ */
+
+    /** 分片状态: RUNNING / DONE / FAILED */
+    public static final String SHARD_RUNNING = "RUNNING";
+    public static final String SHARD_DONE     = "DONE";
+    public static final String SHARD_FAILED   = "FAILED";
+
+    private final Map<Integer, ShardState> shards = new ConcurrentHashMap<>();
+
+    /**
+     * 单个分片的实时状态 (由分片线程写入, 大盘线程读取)
+     */
+    public static final class ShardState {
+        @Getter private final int shardNo;
+        /** 分片负责的主键区间 [rangeLo, rangeHi] */
+        @Getter private final long rangeLo;
+        @Getter private final long rangeHi;
+        /** 本分片已同步行数 */
+        @Getter private volatile long rows;
+        /** 本分片游标当前位置(最近一批的最大 id) */
+        @Getter private volatile long currentId;
+        /** 本分片实时速率(行/秒, 10s 窗口) */
+        @Getter private volatile double rowsPerSec;
+        /** 本分片已完成批次数 */
+        @Getter private volatile int batches;
+        /** RUNNING / DONE / FAILED */
+        @Getter private volatile String state = SHARD_RUNNING;
+        /** 失败原因(仅 FAILED 时) */
+        @Getter private volatile String error;
+
+        /** 本分片窗口采样: {结束时间戳, 行数, 耗时} */
+        private final Deque<long[]> samples = new ArrayDeque<>();
+
+        ShardState(int shardNo, long rangeLo, long rangeHi) {
+            this.shardNo = shardNo;
+            this.rangeLo = rangeLo;
+            this.rangeHi = rangeHi;
+            this.currentId = rangeLo;
+        }
+
+        /** 拷贝构造: 固化实时速率, 供大盘读取快照时使用, 避免序列化过程中读到中间态 */
+        private ShardState(ShardState s, double rate) {
+            this.shardNo = s.shardNo;
+            this.rangeLo = s.rangeLo;
+            this.rangeHi = s.rangeHi;
+            this.rows = s.rows;
+            this.currentId = s.currentId;
+            this.rowsPerSec = rate;
+            this.batches = s.batches;
+            this.state = s.state;
+            this.error = s.error;
+        }
+
+        /** 一批结束: 更新游标与窗口速率 */
+        private synchronized void finishBatch(int batchRows, long newMaxId, long costMs) {
+            long now = System.currentTimeMillis();
+            samples.addLast(new long[]{now, batchRows, Math.max(costMs, 0L)});
+            while (!samples.isEmpty() && now - samples.peekFirst()[0] > WINDOW_MS) {
+                samples.pollFirst();
+            }
+            while (samples.size() > MAX_SAMPLES) {
+                samples.pollFirst();
+            }
+            this.rows += batchRows;
+            this.batches++;
+            if (newMaxId > this.currentId) this.currentId = newMaxId;
+            long r = 0L, c = 0L;
+            for (long[] s : samples) { r += s[1]; c += s[2]; }
+            this.rowsPerSec = r * 1000D / Math.max(c, 1L);
+        }
+
+        /** 实时速率: 窗口长时间无采样时按 0 处理 */
+        private double liveRowsPerSec() {
+            long[] last = samples.peekLast();
+            if (last == null) return 0D;
+            if (System.currentTimeMillis() - last[0] > WINDOW_MS + 2000L) return 0D;
+            return rowsPerSec;
+        }
+    }
+
+    /** 分片任务启动: 注册各分片区间(清空历史) */
+    public synchronized void registerShards(List<long[]> ranges) {
+        shards.clear();
+        for (int k = 0; k < ranges.size(); k++) {
+            shards.put(k + 1, new ShardState(k + 1, ranges.get(k)[0], ranges.get(k)[1]));
+        }
+    }
+
+    /** 分片一批写入成功: 更新行数/游标/速率 */
+    public void shardFinishBatch(int shardNo, int batchRows, long newMaxId, long costMs) {
+        ShardState s = shards.get(shardNo);
+        if (s != null) s.finishBatch(batchRows, newMaxId, costMs);
+    }
+
+    /** 分片完成(游标到头) */
+    public void shardDone(int shardNo) {
+        ShardState s = shards.get(shardNo);
+        if (s != null) s.state = SHARD_DONE;
+    }
+
+    /** 分片失败 */
+    public void shardFailed(int shardNo, String error) {
+        ShardState s = shards.get(shardNo);
+        if (s != null) { s.state = SHARD_FAILED; s.error = error; }
+    }
+
+    /** 是否有分片在跑 */
+    public boolean hasShards() {
+        return !shards.isEmpty();
+    }
+
+    /** 按分片号排序的分片状态快照(含实时速率归零判断) */
+    public Collection<ShardState> shardSnapshot() {
+        Map<Integer, ShardState> sorted = new TreeMap<>(shards);
+        List<ShardState> out = new ArrayList<>(sorted.size());
+        for (ShardState s : sorted.values()) {
+            if (!SHARD_RUNNING.equals(s.state) || !active) {
+                // 非运行中的分片速率置 0, 避免大盘展示过期速率
+                out.add(new ShardState(s, 0D));
+            } else {
+                out.add(new ShardState(s, s.liveRowsPerSec()));
+            }
+        }
+        return out;
+    }
+
     public void setCompareMode(String compareMode) {
         this.compareMode = compareMode == null ? MODE_FULL : compareMode;
     }
@@ -111,6 +247,7 @@ public class TaskMetrics {
      */
     public synchronized void activate(long totalEstimate, long baselineRows) {
         samples.clear();
+        shards.clear();
         this.rowsPerSec = 0D;
         this.readMs = 0D;
         this.writeMs = 0D;

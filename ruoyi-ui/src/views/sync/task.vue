@@ -165,6 +165,13 @@
               </template>
               <el-form-item v-if="form.syncMode === 'ID'" label="起始ID"><el-input-number v-model="form.startId" :min="0" /></el-form-item>
               <el-form-item label="批次大小" prop="batchSize"><el-input-number v-model="form.batchSize" :min="100" :max="100000" /></el-form-item>
+              <el-form-item v-if="form.syncMode === 'ID'" label="并行分片数">
+                <el-input-number v-model="form.shardCount" :min="1" :max="16" />
+                <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                  大于 1 时按主键区间分片多线程并行同步, 大表提速明显 (自增主键效果最佳)。<br/>
+                  需为覆盖式全量或首次全量; 断点续传任务自动回退单线程。暂停后再继续会整体重跑 (幂等写, 无脏数据)。
+                </div>
+              </el-form-item>
               <el-form-item label="覆盖数据">
                 <el-switch v-model="form.overwriteFlag" :active-value="1" :inactive-value="0" />
                 <span style="margin-left:8px;color:#909399;font-size:12px">开启后每次启动会先清空目标表,再全量写入</span>
@@ -277,6 +284,12 @@
       <el-table :data="logPage.rows" v-loading="logLoading" border max-height="500">
         <el-table-column prop="id" label="ID" width="60" />
         <el-table-column prop="batchNo" label="批次" width="60" />
+        <el-table-column label="分片" width="70" align="center">
+          <template slot-scope="s">
+            <el-tag v-if="s.row.shardNo" size="mini" type="warning" effect="plain">S{{ s.row.shardNo }}</el-tag>
+            <span v-else style="color:#c0c4cc">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="batchStartId" label="起始" width="130" />
         <el-table-column prop="batchEndId" label="结束" width="130" />
         <el-table-column prop="batchRows" label="行数" width="70" />
@@ -423,7 +436,7 @@ export default {
 
     onAdd (type) {
       // DDL 类型不需要 batchSize / idField / timeField, syncMode 填 'DDL' 占位即可
-      const base = { taskType: type, syncMode: type === 'FULL' ? 'ID' : (type === 'DDL' ? 'DDL' : 'BINLOG'), idField: 'id', timeField: 'update_time', overwriteFlag: 0 }
+      const base = { taskType: type, syncMode: type === 'FULL' ? 'ID' : (type === 'DDL' ? 'DDL' : 'BINLOG'), idField: 'id', timeField: 'update_time', overwriteFlag: 0, shardCount: 1 }
       if (type !== 'DDL') base.batchSize = 1000
       this.dialog = true; this.form = base; this.tabActive = 'base'
       this.mappings = []; this.sourceFields = []; this.targetFields = []; this.originalMappings = []

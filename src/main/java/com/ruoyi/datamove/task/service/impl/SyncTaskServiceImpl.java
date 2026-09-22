@@ -25,6 +25,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
@@ -122,6 +123,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setStartId(t.getStartId());
         db.setStartTime(t.getStartTime());
         db.setBatchSize(t.getBatchSize());
+        db.setShardCount(t.getShardCount() == null ? 1 : Math.max(1, t.getShardCount()));
         db.setOverwriteFlag(t.getOverwriteFlag() == null ? 0 : t.getOverwriteFlag());
         db.setDingtalkWebhook(t.getDingtalkWebhook());
         db.setAlertEmail(t.getAlertEmail());
@@ -283,6 +285,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         vo.setTableName(task.getTableName());
         vo.setStatus(task.getStatus());
         vo.setBatchSize(task.getBatchSize());
+        vo.setShardCount(task.getShardCount() == null ? 1 : task.getShardCount());
 
         SyncDatasource src = dsMap.get(task.getSourceId());
         SyncDatasource tgt = dsMap.get(task.getTargetId());
@@ -349,6 +352,26 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
             long eta = (long) Math.ceil(Math.max(0L, estimate - syncRows) / rate);
             vo.setEtaSeconds(eta);
             vo.setEtaText(formatEta(eta));
+        }
+
+        // 分片实时监控: 仅分片任务(本次运行注册过 shard)时输出
+        if (m.hasShards()) {
+            Collection<TaskMetrics.ShardState> snapshot = m.shardSnapshot();
+            List<TaskDashboardVO.ShardVO> shardVOs = new ArrayList<>(snapshot.size());
+            for (TaskMetrics.ShardState s : snapshot) {
+                TaskDashboardVO.ShardVO sv = new TaskDashboardVO.ShardVO();
+                sv.setShardNo(s.getShardNo());
+                sv.setRangeLo(s.getRangeLo());
+                sv.setRangeHi(s.getRangeHi());
+                sv.setRows(s.getRows());
+                sv.setCurrentId(s.getCurrentId());
+                sv.setRowsPerSec(round1(s.getRowsPerSec()));
+                sv.setBatches(s.getBatches());
+                sv.setState(s.getState());
+                sv.setError(s.getError());
+                shardVOs.add(sv);
+            }
+            vo.setShards(shardVOs);
         }
         return vo;
     }

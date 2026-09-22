@@ -34,7 +34,7 @@ public class SyncLogService {
     public void writeLog(SyncContext ctx, int batchNo, String startMarker, String endMarker,
                          int batchRows, long totalRows, long costMs,
                          String status, String errorMsg) {
-        writeLog(ctx, batchNo, startMarker, endMarker, batchRows, totalRows, costMs, status, errorMsg, null);
+        writeLog(ctx, null, batchNo, startMarker, endMarker, batchRows, totalRows, costMs, status, errorMsg, null);
     }
 
     /**
@@ -44,6 +44,26 @@ public class SyncLogService {
     public void writeLog(SyncContext ctx, int batchNo, String startMarker, String endMarker,
                          int batchRows, long totalRows, long costMs,
                          String status, String errorMsg, String content) {
+        writeLog(ctx, null, batchNo, startMarker, endMarker, batchRows, totalRows, costMs, status, errorMsg, content);
+    }
+
+    /**
+     * 写一条批次日志(分片任务): shardNo 为分片号(1 起), null = 协调线程/非分片日志
+     */
+    @Async("syncExecutor")
+    public void writeLog(SyncContext ctx, Integer shardNo, int batchNo, String startMarker, String endMarker,
+                         int batchRows, long totalRows, long costMs,
+                         String status, String errorMsg) {
+        writeLog(ctx, shardNo, batchNo, startMarker, endMarker, batchRows, totalRows, costMs, status, errorMsg, null);
+    }
+
+    /**
+     * 写一条批次日志(分片任务), 携带本批次同步的数据内容摘要
+     */
+    @Async("syncExecutor")
+    public void writeLog(SyncContext ctx, Integer shardNo, int batchNo, String startMarker, String endMarker,
+                         int batchRows, long totalRows, long costMs,
+                         String status, String errorMsg, String content) {
         try {
             SyncTaskLog l = new SyncTaskLog();
             l.setTaskId(ctx.getTask().getId());
@@ -51,6 +71,7 @@ public class SyncLogService {
             l.setTableName(ctx.getTask().getTableName());
             l.setSyncMode(ctx.getTask().getSyncMode());
             l.setBatchNo(batchNo);
+            l.setShardNo(shardNo);
             l.setBatchStartId(startMarker);
             l.setBatchEndId(endMarker);
             l.setBatchRows(batchRows);
