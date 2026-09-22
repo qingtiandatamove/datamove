@@ -87,8 +87,14 @@ service.interceptors.response.use(r => {
   } else {
     errMsg = (e.response.data && e.response.data.msg) || e.message || '请求失败'
   }
-  Message.error(errMsg)
-  return safeReject(new Error(errMsg))
+  // config.customError=true 时跳过全局弹窗, 由调用方自行判断
+  // (例如 opt-in 的 License 模块: 未启用时 404 应静默降级为占位提示)
+  if (!(e.config && e.config.customError)) Message.error(errMsg)
+  // 把 HTTP 状态码带出去 —— 否则被包装成 Error 后调用方无法区分 404/401
+  const err = new Error(errMsg)
+  err.status = status
+  err.response = e.response
+  return safeReject(err)
 })
 
 export function request(config) { return service(config) }

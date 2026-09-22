@@ -65,12 +65,13 @@ export default {
       getLicense()
         .then(r => { this.form = r.data; this.disabled = false })
         .catch(err => {
-          // 404 等未注册场景: 后端 LicenseService 因 opt-in 未启用而不存在
-          if (err && (err.status === 404 || (err.message && err.message.indexOf('404') >= 0))) {
+          const status = err && err.status
+          // 404: 后端 LicenseService 因 opt-in 未启用, 路由根本没注册 —— 降级为占位提示
+          if (status === 404 || (err.message && err.message.indexOf('404') >= 0)) {
             this.disabled = true
-          } else if (err && err.status === 401) {
-            // 未登录: 让全局拦截器处理
-            return Promise.reject(err)
+          } else if (status === 401 || status === 403) {
+            // 未登录/无权限: 全局拦截器已弹窗并跳转, 这里静默即可 (不要再 reject, 否则产生 unhandled rejection)
+            return
           } else {
             this.$message.error('加载授权失败: ' + (err.message || ''))
           }

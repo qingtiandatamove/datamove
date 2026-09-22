@@ -95,8 +95,10 @@ export function exportLogUrl (params) {
 export function logTrend (days) { return request({ url: '/sync/log/trend', method: 'get', params: { days } }) }
 
 /* ============ License ============ */
-export function getLicense () { return request({ url: '/sync/license', method: 'get' }) }
-export function updateLicense (data) { return request({ url: '/sync/license', method: 'put', data }) }
+/* customError: 授权模块是 opt-in 的, 未启用时后端路由不存在 (404),
+   由 license.vue 自行降级为「模块未启用」占位, 不走全局错误弹窗 */
+export function getLicense () { return request({ url: '/sync/license', method: 'get', customError: true }) }
+export function updateLicense (data) { return request({ url: '/sync/license', method: 'put', data, customError: true }) }
 
 /* ============ 用户管理 ============ */
 export function pageUser (params) { return request({ url: '/system/user/page', method: 'get', params }) }
