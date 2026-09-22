@@ -9,6 +9,7 @@ import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
+import com.ruoyi.datamove.task.service.TaskRunService;
 import com.ruoyi.datamove.util.JdbcUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +41,7 @@ public class DdlSyncEngine {
     private final SyncTaskProgressMapper progressMapper;
     private final SyncDatasourceMapper datasourceMapper;
     private final SyncLogService logService;
+    private final TaskRunService runService;
 
     /** 单实例保护 */
     private static final Set<Long> RUNNING_TASK = new HashSet<>();
@@ -76,6 +78,8 @@ public class DdlSyncEngine {
         }
 
         RUNNING_TASK.add(taskId);
+        // 运行历史: DDL 是秒级单次操作, 开始即写一条 RUNNING, 结束后立刻回填
+        Long runId = runService.begin(task, src, tgt);
         try {
             // 更新任务状态为 RUNNING, 紧接着会被置为 COMPLETED / FAILED
             task.setStatus(SyncType.STATUS_RUNNING);
@@ -89,6 +93,7 @@ public class DdlSyncEngine {
             taskMapper.updateById(task);
             // 进度表也写一条, 让前端有进度可看
             upsertProgress(task);
+            runService.finish(runId, SyncType.STATUS_COMPLETED, 0L, 0L, 0L, 1, null);
         } catch (Throwable t) {
             log.error("[DDL] task[{}] sync error", task.getTaskName(), t);
             AlertUtils.alert(task, "表结构同步失败",
@@ -96,6 +101,7 @@ public class DdlSyncEngine {
             task.setStatus(SyncType.STATUS_FAILED);
             taskMapper.updateById(task);
             upsertProgressFailed(task);
+            runService.finish(runId, SyncType.STATUS_FAILED, 0L, 0L, 0L, 0, t.getMessage());
             throw new RuntimeException(t.getMessage());
         } finally {
             RUNNING_TASK.remove(taskId);

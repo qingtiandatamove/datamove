@@ -15,6 +15,7 @@ import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.mapper.SyncTaskFieldMappingMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
+import com.ruoyi.datamove.task.service.TaskRunService;
 import com.ruoyi.datamove.util.JdbcUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -57,6 +58,7 @@ public class FullSyncEngine {
     private final SyncTaskFieldMappingMapper fieldMappingMapper;
     private final SyncLogService logService;
     private final TaskMetricsRegistry metricsRegistry;
+    private final TaskRunService runService;
 
     /** 运行中的任务上下文 */
     private static final Map<Long, SyncContext> RUNNING = new HashMap<>();
@@ -151,6 +153,9 @@ public class FullSyncEngine {
         progress.setUpdateTime(new Date());
         progressMapper.updateById(progress);
 
+        // 运行历史: 记一条 RUNNING 记录, 线程结束时回填结果(大盘「运行历史」)
+        ctx.setRunId(runService.begin(task, src, tgt));
+
         log.info("[Sync] task[{}] start, mode={}, table={}, mappingEnabled={}",
                 task.getTaskName(), task.getSyncMode(), task.getTableName(), ctx.isMappingEnabled());
 
@@ -235,6 +240,9 @@ public class FullSyncEngine {
         RUNNING_TASK.remove(taskId);
         RUNNING.remove(taskId);
 
+        // 运行历史: 立即收口(线程内收口幂等, 重复调用不会覆盖已结束的记录)
+        runService.finishRunning(taskId, SyncType.STATUS_STOP, null);
+
         SyncTask task = taskMapper.selectById(taskId);
         if (task != null) {
             task.setStatus(SyncType.STATUS_STOP);
@@ -286,9 +294,16 @@ public class FullSyncEngine {
             progress.setEndTime(new Date());
             progress.setUpdateTime(new Date());
             progressMapper.updateById(progress);
+
+            runService.finish(ctx.getRunId(), SyncType.STATUS_FAILED, progress,
+                    (int) ctx.getBatchNo().get(), t.getMessage());
         } finally {
             TaskMetrics m = metricsRegistry.get(task.getId());
             if (m != null) m.deactivate();
+            // 兜底: 任务已不在 RUNNING 而运行历史还挂着 RUNNING 时收口一次(finish 内部幂等)
+            if (!SyncType.STATUS_RUNNING.equals(task.getStatus())) {
+                runService.finish(ctx.getRunId(), task.getStatus(), progress, (int) ctx.getBatchNo().get(), null);
+            }
             RUNNING_TASK.remove(task.getId());
             RUNNING.remove(task.getId());
         }
@@ -451,14 +466,14 @@ public class FullSyncEngine {
             progress.setFailedRows(0L);
             progress.setUpdateTime(new Date());
             progressMapper.updateById(progress);
-            updatePaused(task, progress);
+            updatePaused(ctx, progress);
             return;
         }
         if (ctx.isStopped()) {
-            updateStopped(task, progress);
+            updateStopped(ctx, progress);
             return;
         }
-        complete(task, progress, globalMaxId.get());
+        complete(ctx, progress, globalMaxId.get());
     }
 
     /** 单个分片: 区间 [lo, hi] 内按游标分批拉取写入, 逻辑与 doSyncById 一致 */
@@ -543,6 +558,8 @@ public class FullSyncEngine {
                         progress.setSuccessRows((progress.getSuccessRows() == null ? 0L : progress.getSuccessRows()) + batchRows);
                         progress.setUpdateTime(new Date());
                         progressMapper.updateById(progress);
+                        // 运行历史心跳(最多 5s 一次落库, 分片共享同一条运行记录)
+                        runService.heartbeat(ctx.getRunId(), progress, (int) ctx.getBatchNo().get());
                         logService.writeLog(ctx, shardNo, batchNo, tag + prevId, tag + lastId, batchRows, total,
                                 System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
                     }
@@ -624,7 +641,7 @@ public class FullSyncEngine {
 
             while (!ctx.isStopped()) {
                 if (ctx.isPaused()) {
-                    updatePaused(task, progress);
+                    updatePaused(ctx, progress);
                     return;
                 }
                 psSrc.setLong(1, lastId);
@@ -657,7 +674,7 @@ public class FullSyncEngine {
 
                 if (batchRows == 0) {
                     tgt.commit();
-                    complete(task, progress, newMaxId);
+                    complete(ctx, progress, newMaxId);
                     logService.writeLog(ctx, batchNo, String.valueOf(lastId), String.valueOf(lastId),
                             0, totalRows, System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
                     return;
@@ -682,6 +699,8 @@ public class FullSyncEngine {
                     progress.setSuccessRows((progress.getSuccessRows() == null ? 0L : progress.getSuccessRows()) + batchRows);
                     progress.setUpdateTime(new Date());
                     progressMapper.updateById(progress);
+                    // 运行历史心跳(最多 5s 一次落库)
+                    runService.heartbeat(ctx.getRunId(), progress, (int) ctx.getBatchNo().get());
 
                     logService.writeLog(ctx, batchNo, String.valueOf(lastId - batchRows + 1),
                             String.valueOf(lastId), batchRows, totalRows,
@@ -707,7 +726,7 @@ public class FullSyncEngine {
             }
             // 走到了 stop()
             tgt.commit();
-            updateStopped(task, progress);
+            updateStopped(ctx, progress);
         }
     }
 
@@ -757,7 +776,7 @@ public class FullSyncEngine {
 
             while (!ctx.isStopped()) {
                 if (ctx.isPaused()) {
-                    updatePaused(task, progress);
+                    updatePaused(ctx, progress);
                     return;
                 }
                 Timestamp ts = lastTime == null ? new Timestamp(0L) : new Timestamp(lastTime.getTime());
@@ -808,7 +827,7 @@ public class FullSyncEngine {
 
                 if (batchRows == 0) {
                     tgt.commit();
-                    complete(task, progress, null);
+                    complete(ctx, progress, null);
                     logService.writeLog(ctx, batchNo,
                             lastTime == null ? "" : new SimpleDateFormat(DATE_FMT).format(lastTime),
                             lastTime == null ? "" : new SimpleDateFormat(DATE_FMT).format(lastTime),
@@ -843,6 +862,8 @@ public class FullSyncEngine {
                     progress.setSuccessRows((progress.getSuccessRows() == null ? 0L : progress.getSuccessRows()) + batchRows);
                     progress.setUpdateTime(new Date());
                     progressMapper.updateById(progress);
+                    // 运行历史心跳(最多 5s 一次落库)
+                    runService.heartbeat(ctx.getRunId(), progress, (int) ctx.getBatchNo().get());
 
                     logService.writeLog(ctx, batchNo,
                             lastTime == null ? "" : new SimpleDateFormat(DATE_FMT).format(lastTime),
@@ -863,7 +884,7 @@ public class FullSyncEngine {
                 }
             }
             tgt.commit();
-            updateStopped(task, progress);
+            updateStopped(ctx, progress);
         }
     }
 
@@ -1033,31 +1054,38 @@ public class FullSyncEngine {
         return cols;
     }
 
-    private void updatePaused(SyncTask task, SyncTaskProgress progress) {
+    private void updatePaused(SyncContext ctx, SyncTaskProgress progress) {
+        SyncTask task = ctx.getTask();
         task.setStatus(SyncType.STATUS_PAUSE);
         taskMapper.updateById(task);
         progress.setStatus(SyncType.STATUS_PAUSE);
         progress.setUpdateTime(new Date());
         progressMapper.updateById(progress);
+        // 运行历史: 本次运行以「已暂停」收口, 继续时会新建一条运行记录
+        runService.finish(ctx.getRunId(), SyncType.STATUS_PAUSE, progress, (int) ctx.getBatchNo().get(), null);
         log.info("[Sync] task[{}] paused", task.getTaskName());
     }
 
-    private void updateStopped(SyncTask task, SyncTaskProgress progress) {
+    private void updateStopped(SyncContext ctx, SyncTaskProgress progress) {
+        SyncTask task = ctx.getTask();
         task.setStatus(SyncType.STATUS_STOP);
         taskMapper.updateById(task);
         progress.setStatus(SyncType.STATUS_STOP);
         progress.setEndTime(new Date());
         progress.setUpdateTime(new Date());
         progressMapper.updateById(progress);
+        runService.finish(ctx.getRunId(), SyncType.STATUS_STOP, progress, (int) ctx.getBatchNo().get(), null);
         log.info("[Sync] task[{}] stopped", task.getTaskName());
     }
 
-    private void complete(SyncTask task, SyncTaskProgress progress, Long newMaxId) {
+    private void complete(SyncContext ctx, SyncTaskProgress progress, Long newMaxId) {
+        SyncTask task = ctx.getTask();
         if (newMaxId != null) progress.setLastSyncMaxId(newMaxId);
         progress.setStatus(SyncType.STATUS_COMPLETED);
         progress.setEndTime(new Date());
         progress.setUpdateTime(new Date());
         progressMapper.updateById(progress);
+        runService.finish(ctx.getRunId(), SyncType.STATUS_COMPLETED, progress, (int) ctx.getBatchNo().get(), null);
         task.setStatus(SyncType.STATUS_COMPLETED);
         taskMapper.updateById(task);
         log.info("[Sync] task[{}] completed", task.getTaskName());

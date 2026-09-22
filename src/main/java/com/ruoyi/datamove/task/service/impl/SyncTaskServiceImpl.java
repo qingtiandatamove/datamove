@@ -14,10 +14,12 @@ import com.ruoyi.datamove.engine.metrics.TaskMetricsRegistry;
 import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
+import com.ruoyi.datamove.task.domain.SyncTaskRun;
 import com.ruoyi.datamove.task.domain.TaskDashboardVO;
 import com.ruoyi.datamove.task.mapper.SyncTaskLogMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
+import com.ruoyi.datamove.task.mapper.SyncTaskRunMapper;
 import com.ruoyi.datamove.task.service.ISyncTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,6 +42,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     private final SyncTaskMapper          taskMapper;
     private final SyncTaskProgressMapper  progressMapper;
     private final SyncTaskLogMapper       logMapper;
+    private final SyncTaskRunMapper       runMapper;
     private final SyncDatasourceMapper    datasourceMapper;
     private final FullSyncEngine          fullSyncEngine;
     private final CanalSyncEngine         canalSyncEngine;
@@ -145,8 +148,9 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         }
         db.setDelFlag("1");
         taskMapper.updateById(db);
-        // 同步删除日志
+        // 同步删除日志、断点进度与运行历史
         logMapper.delete(new QueryWrapper<SyncTaskLog>().eq("task_id", id));
+        runMapper.delete(new QueryWrapper<SyncTaskRun>().eq("task_id", id));
         progressMapper.delete(new QueryWrapper<SyncTaskProgress>().eq("task_id", id));
         // 清理运行期实时指标
         metricsRegistry.remove(id);
@@ -272,9 +276,26 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         }
 
         long now = System.currentTimeMillis();
+
+        // 历史运行: 每个任务最近一次运行记录 + 累计运行次数 (sync_task_run)
+        Map<Long, SyncTaskRun> lastRunMap = new HashMap<>();
+        for (SyncTaskRun r : runMapper.selectLatestPerTask()) {
+            if (r.getTaskId() != null) lastRunMap.put(r.getTaskId(), r);
+        }
+        Map<Long, Long> runCountMap = new HashMap<>();
+        for (Map<String, Object> row : runMapper.countGroupByTask()) {
+            Object tid = row.get("taskId") != null ? row.get("taskId") : row.get("task_id");
+            Object cnt = row.get("cnt") != null ? row.get("cnt") : row.get("CNT");
+            if (tid instanceof Number) {
+                runCountMap.put(((Number) tid).longValue(), cnt instanceof Number ? ((Number) cnt).longValue() : 0L);
+            }
+        }
+
         List<TaskDashboardVO> list = new ArrayList<>(tasks.size());
         for (SyncTask task : tasks) {
-            list.add(toDashboardVO(task, progressMap.get(task.getId()), dsMap, now));
+            TaskDashboardVO vo = toDashboardVO(task, progressMap.get(task.getId()), dsMap, now);
+            fillRunHistory(vo, lastRunMap.get(task.getId()), runCountMap.get(task.getId()));
+            list.add(vo);
         }
         // 运行中 / 暂停 的排前面, 其余按最近更新倒序
         list.sort((a, b) -> {
@@ -386,6 +407,20 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
             vo.setShards(shardVOs);
         }
         return vo;
+    }
+
+    /**
+     * 大盘补充历史运行信息: 累计运行次数 + 最近一次运行结果 (sync_task_run)
+     */
+    private void fillRunHistory(TaskDashboardVO vo, SyncTaskRun last, Long runCount) {
+        vo.setRunCount(runCount == null ? 0 : runCount.intValue());
+        if (last == null) return;
+        vo.setLastRunStatus(last.getStatus());
+        vo.setLastRunTime(last.getStartTime());
+        vo.setLastRunEndTime(last.getEndTime());
+        vo.setLastRunCostSeconds(last.getCostSeconds());
+        vo.setLastRunRows(last.getSuccessRows());
+        vo.setLastRunFailedRows(last.getFailedRows());
     }
 
     /** 大盘排序权重: 运行中 > 暂停 > 其他 */

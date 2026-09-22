@@ -21,6 +21,7 @@ import com.ruoyi.datamove.task.mapper.SyncCanalPositionMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskFieldMappingMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
+import com.ruoyi.datamove.task.service.TaskRunService;
 import com.ruoyi.datamove.util.JdbcUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -55,6 +56,7 @@ public class CanalSyncEngine {
     private final SyncTaskFieldMappingMapper fieldMappingMapper;
     private final SyncLogService         logService;
     private final TaskMetricsRegistry    metricsRegistry;
+    private final TaskRunService         runService;
 
     /** 任务 -> worker executor */
     private static final Map<Long, CanalWorker> WORKERS = new ConcurrentHashMap<>();
@@ -126,7 +128,9 @@ public class CanalSyncEngine {
         metrics.setCompareMode(TaskMetrics.MODE_STREAM);
         metrics.activate(-1L, base == null || base.getSuccessRows() == null ? 0L : base.getSuccessRows());
 
-        CanalWorker worker = new CanalWorker(task, connector, src, tgt);
+        // 运行历史: 记一条 RUNNING 记录(增量任务长期运行), worker 结束时回填结果
+        Long runId = runService.begin(task, src, tgt);
+        CanalWorker worker = new CanalWorker(task, connector, src, tgt, runId);
         WORKERS.put(taskId, worker);
         executor.submit(worker);
 
@@ -173,6 +177,8 @@ public class CanalSyncEngine {
             p.setUpdateTime(new Date());
             progressMapper.updateById(p);
         }
+        // 运行历史: 立即收口(worker 内也会收口, 幂等)
+        runService.finishRunning(taskId, SyncType.STATUS_STOP, null);
     }
 
     /** 异步执行器 */
@@ -189,14 +195,19 @@ public class CanalSyncEngine {
         private final CanalConnector connector;
         private final SyncDatasource src;
         private final SyncDatasource tgt;
+        /** 本次运行历史ID (可能为 null: 写历史失败) */
+        private final Long runId;
         private volatile boolean running = true;
+        /** 已应用批次数, 供运行历史回填 */
+        private int batchNo = 0;
 
         public CanalWorker(SyncTask task, CanalConnector connector,
-                           SyncDatasource src, SyncDatasource tgt) {
+                           SyncDatasource src, SyncDatasource tgt, Long runId) {
             this.task = task;
             this.connector = connector;
             this.src = src;
             this.tgt = tgt;
+            this.runId = runId;
         }
 
         public void shutdown() {
@@ -305,9 +316,10 @@ public class CanalSyncEngine {
                 }
 
                 SyncContext ctx = buildCtx(task, src, tgt);
+                ctx.setRunId(runId);
                 log.info("[IncrSync] task[{}] mappingEnabled={}", task.getTaskName(), ctx.isMappingEnabled());
                 TaskMetrics metrics = metricsRegistry.get(task.getId());
-                int batchNo = 0;
+                batchNo = 0;
                 while (running) {
                     // 等待并拉取 binlog 批次的耗时
                     long getStartMs = System.currentTimeMillis();
@@ -420,6 +432,8 @@ public class CanalSyncEngine {
                                 progress.setTotalRows((progress.getTotalRows() == null ? 0L : progress.getTotalRows()) + inserts + updates + deletes);
                                 progress.setUpdateTime(new Date());
                                 progressMapper.updateById(progress);
+                                // 运行历史心跳(最多 5s 一次落库)
+                                runService.heartbeat(ctx.getRunId(), progress, batchNo);
                             }
                             log.info("[IncrSync] task[{}] inserts={}, updates={}, deletes={}, errs={}",
                                     task.getTaskName(), inserts, updates, deletes, errs);
@@ -465,6 +479,8 @@ public class CanalSyncEngine {
 
                 // 写一条 batchNo=0 的失败日志, "日志"弹窗里能看到具体异常
                 String errMsg = e.getMessage();
+                runService.finish(runId, SyncType.STATUS_FAILED, p, batchNo,
+                        errMsg == null ? e.getClass().getName() : errMsg);
                 SyncContext ctx = buildCtx(task, src, tgt);
                 logService.writeLog(ctx, 0, null, null, 0, totalRows, 0L,
                         SyncType.LOG_FAILED,
@@ -475,6 +491,10 @@ public class CanalSyncEngine {
             } finally {
                 TaskMetrics m = metricsRegistry.get(task.getId());
                 if (m != null) m.deactivate();
+                // 运行历史: 停止/异常后仍为 RUNNING 的记录兜底收口(finish 幂等)
+                runService.finish(runId, SyncType.STATUS_STOP,
+                        progressMapper.selectOne(new QueryWrapper<SyncTaskProgress>().eq("task_id", task.getId())),
+                        batchNo, null);
                 try { connector.disconnect(); } catch (Exception ignored) {}
             }
         }

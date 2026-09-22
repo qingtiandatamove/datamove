@@ -36,6 +36,9 @@ public class SyncContext {
     /** 批次计数,从0开始 */
     private AtomicLong batchNo;
 
+    /** 本次运行历史ID (sync_task_run.id), 用于回填运行结果; null = 未记录历史 */
+    private Long runId;
+
     /** 暂停标记 - 线程池外层检查 */
     private AtomicBoolean pauseFlag;
 

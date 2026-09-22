@@ -73,6 +73,17 @@ public class TaskDashboardVO implements Serializable {
     /** 瓶颈的可读文本, 未知时为 null */
     private String bottleneckText;
 
+    /* ---------- 历史运行 (sync_task_run) ---------- */
+    /** 历史累计运行次数 */
+    private Integer runCount;
+    /** 最近一次运行: 状态 / 开始时间 / 结束时间 / 耗时 / 成功行数 / 失败行数 */
+    private String lastRunStatus;
+    private Date   lastRunTime;
+    private Date   lastRunEndTime;
+    private Long   lastRunCostSeconds;
+    private Long   lastRunRows;
+    private Long   lastRunFailedRows;
+
     /* ---------- 分片实时监控 (仅分片任务) ---------- */
     /** 各分片实时状态, 按分片号升序; null/空 = 非分片任务 */
     private List<ShardVO> shards;

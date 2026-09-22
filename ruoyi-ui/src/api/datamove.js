@@ -65,6 +65,19 @@ export function clearLogByFilter (params) { return request({ url: '/sync/log/cle
 /* 任务大盘: 进度 + 实时速率/ETA/当前批次/瓶颈库 */
 export function taskDashboard () { return request({ url: '/sync/task/dashboard', method: 'get' }) }
 
+/* ============ 运行历史 (每次启动任务一条记录) ============ */
+export function runPage (params) { return request({ url: '/sync/task/run/page', method: 'get', params }) }
+/* 按当前筛选条件统计 (运行次数/成功/失败/行数/平均耗时/平均速率) */
+export function runSummary (params) { return request({ url: '/sync/task/run/summary', method: 'get', params }) }
+/* 近 N 天运行趋势 (次数/行数) */
+export function runTrend (params) { return request({ url: '/sync/task/run/trend', method: 'get', params }) }
+/* 按筛选条件清理运行历史 (保留天数 beforeDays; 无条件时需 force=true). 返回删除条数 */
+export function clearTaskRun (params) { return request({ url: '/sync/task/run/clear', method: 'delete', params }) }
+export function exportRunUrl (params) {
+  const qs = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
+  return (process.env.NODE_ENV === 'production' ? '' : '/dev-api') + '/sync/task/run/export?' + qs
+}
+
 /* 任务-字段映射 (源字段 -> 目标字段, FULL + INCR 都生效) */
 export function listFieldMapping (taskId) { return request({ url: `/sync/task/fieldMapping/list/${taskId}`, method: 'get' }) }
 export function saveFieldMapping (taskId, list) { return request({ url: `/sync/task/fieldMapping/save/${taskId}`, method: 'post', data: list }) }

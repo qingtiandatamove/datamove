@@ -113,6 +113,18 @@ datamove/
 - **任务大盘** (`/sync/dashboard`):实时展示每个任务的 **行/秒**(10s 滑动窗口)、
   **ETA**(按源表总行数估算)、**当前批次**、**瓶颈库**(源库读取 对比 目标库写入耗时)、
   进度与总吞吐; 分片任务额外展示每个分片的**区间、游标、实时速率、状态**, 有任务运行时 3s 自动刷新
+- **运行历史**(大盘「运行历史」区块, 表 `sync_task_run`):实时监控看现在, 运行历史看过去——
+  每次「启动」任务写一条记录, 全量 / 增量 / 表结构任务都适用
+  - 概览卡: 运行次数 / 成功 / 失败 / 运行中 / 同步行数 / 失败行数 / 平均耗时 / 平均速率(按当前筛选条件实时统计)
+  - 近 7 / 14 / 30 天趋势图: 柱 = 运行次数(成功、失败堆叠), 线 = 同步行数
+  - 多维筛选: 任务、表名、类型、结果、时间范围, 以及**关键字**(表名 / 源库 / 目标库 / 模式 / 异常信息)
+  - 表格: 结果、开始 / 结束时间、耗时、成功 / 失败行数、平均速率(行/秒)、批次数、分片数、异常;
+    失败行与运行中行高亮, 双击或点「详情」查看完整记录(可一键复制), 支持 **CSV 导出**(与筛选条件口径一致)
+  - 运行中每 5s 回填一次进度(服务重启也能看到跑到哪), 结束后回填最终结果;
+    完成 / 失败 / 停止 / 暂停都会各自收口一条历史, 不会留下「悬挂的运行中」
+  - 「清理」支持按当前筛选条件清理, 或只保留最近 N 天(运行中的记录不会被清理); 删除任务时其运行历史一并删除
+- **全部任务表格**还展示每个任务的 **运行次数**(可点击直接筛出该任务的运行历史)与
+  **最近运行**(结果 / 时间 / 同步行数 / 耗时), 一眼看出哪些任务最近跑挂了
 - **分片并行同步**(大数据提速):FULL+ID 模式配置 `shard_count > 1` 时按 `MIN/MAX(主键)` 均分区间,
   每分片独立线程与连接并行读写, 吞吐近线性提升(1000 万行从约 31 分钟缩到数分钟);
   断点续传任务自动回退单线程, 暂停后重跑幂等无脏数据
@@ -173,6 +185,7 @@ datamove/
 | `sync_task` | 同步任务主表 |
 | `sync_task_progress` | **断点进度核心表** |
 | `sync_task_log` | 同步日志 (含批次明细) |
+| `sync_task_run` | **运行历史核心表** (每次启动一条: 结果 / 耗时 / 行数 / 速率 / 异常) |
 | `sync_canal_position` | Canal 增量监听位点 |
 | `sys_user / sys_role / sys_user_role / sys_menu / sys_role_menu` | RuoYi 框架权限 |
 
@@ -191,8 +204,12 @@ mysql -uroot -p < sql/datamove.sql
 
 老库升级(已初始化过的环境):
 ```bash
+mysql -uroot -p datamove < sql/upgrade_20260921_alert_email.sql
 mysql -uroot -p datamove < sql/upgrade_20260921_field_mapping.sql
+mysql -uroot -p datamove < sql/upgrade_20260921_sql_favorite.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_shard_count.sql
+mysql -uroot -p datamove < sql/upgrade_20260922_shard_no.sql
+mysql -uroot -p datamove < sql/upgrade_20260922_task_run.sql
 ```
 
 ### 3. 启动后端
