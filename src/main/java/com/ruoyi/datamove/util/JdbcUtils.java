@@ -200,6 +200,9 @@ public class JdbcUtils {
                 if (from.equals(to)) continue;
                 normalized = normalized.replace("`" + from + "`", "`" + to + "`");
             }
+            // 部分字段映射: 未映射列保留 NOT NULL 且无默认值时,
+            // INSERT 不带这些列会报 "Field 'xxx' doesn't have a default value", 建表时放宽为可空
+            normalized = relaxUnmappedNotNull(normalized, renameMap.keySet());
         }
         // 5. 在目标库执行
         try (Connection c = getConnection(tgt);
@@ -227,6 +230,34 @@ public class JdbcUtils {
             log.error("isTableExists failed", e);
             return false;
         }
+    }
+
+    /**
+     * 部分字段映射自动建表: 未映射列若定义为 NOT NULL 且无 DEFAULT,
+     * 放宽为 NULL, 否则 INSERT 只写已映射列时会报
+     * "Field 'xxx' doesn't have a default value"。
+     * <p>只处理"列定义行"(行首以 ` 开头, 即列名 backtick), 不动索引/约束行;
+     * AUTO_INCREMENT / 已有 DEFAULT 的列保持原定义。
+     *
+     * @param mappedSrcCols 已映射的源列名集合
+     */
+    private static String relaxUnmappedNotNull(String ddl, Set<String> mappedSrcCols) {
+        String[] lines = ddl.split("\n");
+        boolean relaxed = false;
+        for (int i = 0; i < lines.length; i++) {
+            String trimmed = lines[i].trim();
+            if (!trimmed.startsWith("`")) continue;
+            int end = trimmed.indexOf('`', 1);
+            if (end <= 1) continue;
+            String col = trimmed.substring(1, end);
+            if (mappedSrcCols.contains(col)) continue;
+            if (!trimmed.contains("NOT NULL") || trimmed.contains("DEFAULT")
+                    || trimmed.contains("AUTO_INCREMENT")) continue;
+            lines[i] = lines[i].replace(" NOT NULL", " NULL");
+            relaxed = true;
+            log.info("[DDL] 部分映射: 未映射列 `{}` 建表时放宽为可空", col);
+        }
+        return relaxed ? String.join("\n", lines) : ddl;
     }
 
     /** SHOW CREATE TABLE - 第2列是 Create Table 语句 */

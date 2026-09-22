@@ -38,7 +38,8 @@ import java.util.concurrent.atomic.AtomicLong;
  *  3.2.1 全量同步任务 - 双同步模式 (按主键ID / 按时间)
  *  3.2.2 断点续传 - 整批写入成功才更新断点,失败自动重试
  *  3.2.3 幂等防重 - INSERT ... ON DUPLICATE KEY UPDATE
- *  3.2.5 字段映射 - 源/目标字段名不同时按 sync_task_field_mapping 配置重命名同步
+ *  3.2.5 字段映射 - 源/目标字段名不同时按 sync_task_field_mapping 配置重命名同步;
+ *           支持部分字段映射 (只同步已配对的字段, 断点字段未映射时自动补进 SELECT)
  *
  * 支持:
  *  - 启动/暂停/继续/终止
@@ -310,7 +311,9 @@ public class FullSyncEngine {
         List<String> tgtFields = resolveTargetFields(ctx, srcFields);
 
         String insertSql = buildInsertSql(table, tgtFields);
-        String selectSql = "SELECT " + joinBackticked(srcFields) + " FROM `" + table + "` WHERE `" + srcIdField + "` > ? ORDER BY `" + srcIdField + "` ASC LIMIT " + batchSize;
+        // 部分字段映射: 断点字段(主键)即使未映射也要进 SELECT, 否则按列名取值会报 Column not found
+        List<String> selectFields = withBreakpointFields(srcFields, srcIdField);
+        String selectSql = "SELECT " + joinBackticked(selectFields) + " FROM `" + table + "` WHERE `" + srcIdField + "` > ? ORDER BY `" + srcIdField + "` ASC LIMIT " + batchSize;
 
         long lastId = progress.getLastSyncMaxId() == null ? 0L : progress.getLastSyncMaxId();
         long totalRows = progress.getTotalRows() == null ? 0L : progress.getTotalRows();
@@ -441,7 +444,9 @@ public class FullSyncEngine {
         String insertSql = buildInsertSql(table, tgtFields);
 
         // key 排序: 时间 ASC, ID ASC, 用于同秒拆分
-        String selectSql = "SELECT " + joinBackticked(srcFields) + " FROM `" + table + "` WHERE `" + srcTimeField + "` > ? OR (`" + srcTimeField + "` = ? AND `" + srcIdField + "` > ?) ORDER BY `" + srcTimeField + "` ASC, `" + srcIdField + "` ASC LIMIT " + batchSize;
+        // 部分字段映射: 断点字段(时间/主键)即使未映射也要进 SELECT, 否则按列名取值会报 Column not found
+        List<String> selectFields = withBreakpointFields(srcFields, srcTimeField, srcIdField);
+        String selectSql = "SELECT " + joinBackticked(selectFields) + " FROM `" + table + "` WHERE `" + srcTimeField + "` > ? OR (`" + srcTimeField + "` = ? AND `" + srcIdField + "` > ?) ORDER BY `" + srcTimeField + "` ASC, `" + srcIdField + "` ASC LIMIT " + batchSize;
 
         Date lastTime = progress.getLastSyncTime();
         Long lastIdInBatch = progress.getLastSyncMaxId();
@@ -623,6 +628,18 @@ public class FullSyncEngine {
             sb.append('`').append(fields.get(i)).append('`');
         }
         return sb.toString();
+    }
+
+    /**
+     * 部分字段映射: 断点字段(id/time)即使未映射也追加到 SELECT 列表,
+     * 只用于断点推进(读值), 不参与 INSERT 写入, 支持只同步部分字段
+     */
+    private static List<String> withBreakpointFields(List<String> srcFields, String... extraFields) {
+        List<String> select = new ArrayList<>(srcFields);
+        for (String f : extraFields) {
+            if (f != null && !f.isEmpty() && !select.contains(f)) select.add(f);
+        }
+        return select;
     }
 
     /**
