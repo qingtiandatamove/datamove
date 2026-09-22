@@ -2,6 +2,19 @@
 -- 轻量 MySQL 数据同步工具 - 数据库初始化脚本
 -- 对应需求文档 4.1~4.4 四张核心业务表
 -- 同时保留 RuoYi-Vue 框架所需的用户/角色/权限基础表
+--
+-- 【全新环境】只需执行本脚本, 不必再执行 sql/upgrade_*.sql:
+--     mysql -uroot -p < sql/datamove.sql
+--   本脚本已包含下列历史升级的全部结构变更:
+--     upgrade_20260921_alert_email    sync_task.alert_email
+--     upgrade_20260921_field_mapping  sync_task_field_mapping 表
+--     upgrade_20260921_sql_favorite   sync_sql_favorite 表
+--     upgrade_20260922_shard_count    sync_task.shard_count
+--     upgrade_20260922_shard_no       sync_task_log.shard_no
+--     upgrade_20260922_task_run       sync_task_run 表
+--
+-- 【已有环境】请勿执行本脚本 —— 其中含 DROP TABLE 重建, 会清空业务数据;
+--   请按日期顺序执行 sql/upgrade_*.sql (那些脚本是幂等的)
 -- =====================================================
 
 CREATE DATABASE IF NOT EXISTS `datamove` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
@@ -144,6 +157,22 @@ CREATE TABLE `sync_task` (
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='同步任务表';
 
+-- 4.2.1 任务字段映射表 (源字段 -> 目标字段 一对一重命名, FULL/INCR 通用)
+-- 用 IF NOT EXISTS 而非 DROP: 老环境若已执行过 upgrade_20260921_field_mapping.sql,
+-- 重复执行本脚本时不会清掉用户已配置好的映射关系
+CREATE TABLE IF NOT EXISTS `sync_task_field_mapping` (
+  `id`           bigint(20)   NOT NULL AUTO_INCREMENT COMMENT '主键',
+  `task_id`      bigint(20)   NOT NULL COMMENT '任务ID (sync_task.id)',
+  `source_field` varchar(100) NOT NULL COMMENT '源表字段名',
+  `target_field` varchar(100) NOT NULL COMMENT '目标表字段名',
+  `sort_no`      int(11)      NOT NULL DEFAULT 0 COMMENT '顺序 (SELECT/INSERT 列表顺序)',
+  `create_time`  datetime     DEFAULT NULL,
+  `update_time`  datetime     DEFAULT NULL,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_task_src_f` (`task_id`, `source_field`),
+  KEY `idx_task_id` (`task_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='同步任务字段映射表 - 源字段 -> 目标字段 一对一重命名';
+
 -- 4.3 任务断点进度表 (核心表,支撑断点续传)
 DROP TABLE IF EXISTS `sync_task_progress`;
 CREATE TABLE `sync_task_progress` (
@@ -244,6 +273,27 @@ CREATE TABLE `sync_sql_log` (
   KEY `idx_status` (`status`),
   KEY `idx_create_time` (`create_time`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SQL执行日志表';
+
+-- 4.6 SQL 工作台收藏夹
+-- 用 IF NOT EXISTS: 老环境若已执行过 upgrade_20260921_sql_favorite.sql, 不会清掉已有收藏
+CREATE TABLE IF NOT EXISTS `sync_sql_favorite` (
+  `id`          bigint(20)   NOT NULL AUTO_INCREMENT COMMENT '收藏ID',
+  `user_id`     bigint(20)   DEFAULT NULL COMMENT '创建者ID',
+  `user_name`   varchar(64)  DEFAULT NULL COMMENT '创建者账号',
+  `ds_id`       bigint(20)   DEFAULT NULL COMMENT '数据源ID, NULL=通用',
+  `ds_name`     varchar(100) DEFAULT NULL COMMENT '数据源名称',
+  `title`       varchar(64)  NOT NULL COMMENT '收藏标题',
+  `sql_text`    text         NOT NULL COMMENT 'SQL 内容',
+  `tags`        varchar(255) DEFAULT NULL COMMENT '逗号分隔标签',
+  `use_count`   int(11)      NOT NULL DEFAULT 0 COMMENT '使用次数',
+  `shared`      tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否团队共享: 0=私有 1=共享',
+  `create_time` datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+  `update_time` datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  PRIMARY KEY (`id`),
+  KEY `idx_user_name` (`user_name`),
+  KEY `idx_ds_id` (`ds_id`),
+  KEY `idx_create_time` (`create_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SQL 工作台收藏夹';
 
 -- ============== 授权License表 ==============
 DROP TABLE IF EXISTS `sync_license`;

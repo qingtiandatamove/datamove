@@ -210,7 +210,9 @@ datamove/
 mysql -uroot -p < sql/datamove.sql
 ```
 
-老库升级(已初始化过的环境):
+> 初始化脚本已包含下面全部升级项的结构变更, **全新环境到此为止**, 不必再执行升级脚本。
+
+老库升级(仅限"已经初始化过的老库", 脚本幂等, 按日期顺序执行):
 ```bash
 mysql -uroot -p datamove < sql/upgrade_20260921_alert_email.sql
 mysql -uroot -p datamove < sql/upgrade_20260921_field_mapping.sql
