@@ -204,7 +204,7 @@
             <el-button size="mini" type="warning" @click="clearMappings" icon="el-icon-delete"
                        :disabled="!mappings.length">清空映射 (回到同名模式)</el-button>
             <span class="fm-stat">
-              已配对 <b class="ok">{{ mappings.length }}</b> 对 / 源 {{ sourceFields.length + mappings.length }} 字段 / 目标 {{ targetFields.length + mappings.length }} 字段
+              已配对 <b class="ok">{{ mappings.length }}</b> 对 / 源 {{ sourceFields.length }} 字段 / 目标 {{ targetFields.length }} 字段
             </span>
           </div>
 
@@ -216,7 +216,7 @@
                 <div v-if="!sourceFields.length" class="fm-empty">无字段, 请先填写源数据源与表名</div>
                 <div v-for="f in sourceFields" :key="'s-' + f.name"
                      class="fm-item fm-item-src"
-                     :class="{ 'fm-item-dim': isSrcMapped(f.name) }"
+                     :class="{ 'fm-item-dim': isSrcMapped(f.name), 'fm-item-picking': drag.active && drag.srcName === f.name }"
                      :data-name="f.name"
                      @mousedown="onSrcMouseDown($event, f)">
                   <span class="fm-item-name">{{ f.name }}</span>
@@ -225,16 +225,23 @@
               </div>
             </div>
 
-            <!-- 中: SVG 连线层 (覆盖在两栏之间) -->
-            <svg class="fm-svg" :viewBox="fmViewBox" preserveAspectRatio="none">
-              <g v-for="(m, i) in mappings" :key="'m-' + i + '-' + m.sourceField" class="fm-line">
+            <!-- 中: SVG 连线层 (覆盖整个 stage, 像素坐标与 DOM 1:1 对应) -->
+            <svg class="fm-svg" :viewBox="'0 0 ' + fmSize.w + ' ' + fmSize.h" preserveAspectRatio="none">
+              <g v-for="(m, i) in mappings" :key="'m-' + i + '-' + m.sourceField + '-' + m.targetField"
+                 class="fm-line" v-show="m.path">
                 <path :d="m.path" class="fm-line-path" />
-                <circle :cx="midX(m)" :cy="midY(m)" r="8" class="fm-line-close-bg" @click="removeMapping(i)" />
-                <text :x="midX(m)" :y="midY(m) + 3" text-anchor="middle" class="fm-line-close-x"
+                <circle :cx="m.sx" :cy="m.sy" r="3.5" class="fm-line-dot" />
+                <circle :cx="m.tx" :cy="m.ty" r="3.5" class="fm-line-dot" />
+                <circle :cx="midX(m)" :cy="midY(m)" r="9" class="fm-line-close-bg" @click="removeMapping(i)" />
+                <text :x="midX(m)" :y="midY(m) + 4" text-anchor="middle" class="fm-line-close-x"
                       @click="removeMapping(i)">×</text>
               </g>
               <!-- 拖拽中的临时线 -->
-              <path v-if="drag.active" :d="drag.path" class="fm-line-drag" />
+              <g v-if="drag.active">
+                <path :d="drag.path" class="fm-line-drag" />
+                <circle :cx="drag.startX" :cy="drag.startY" r="4" class="fm-line-dot drag" />
+                <circle :cx="drag.curX" :cy="drag.curY" r="4" class="fm-line-dot drag" />
+              </g>
             </svg>
 
             <!-- 右: 目标字段 -->
@@ -244,9 +251,8 @@
                 <div v-if="!targetFields.length" class="fm-empty">无字段, 请先填写目标数据源与表名</div>
                 <div v-for="f in targetFields" :key="'t-' + f.name"
                      class="fm-item fm-item-tgt"
-                     :class="{ 'fm-item-dim': isTgtMapped(f.name) }"
-                     :data-name="f.name"
-                     @mouseup="onTgtMouseUp($event, f)">
+                     :class="{ 'fm-item-dim': isTgtMapped(f.name), 'fm-item-drop': drag.active && drag.hoverName === f.name }"
+                     :data-name="f.name">
                   <span class="fm-item-name">{{ f.name }}</span>
                   <span class="fm-item-type">{{ f.type }}</span>
                 </div>
@@ -321,22 +327,20 @@ export default {
       /* ============ 字段映射 ============ */
       tabActive: 'base',
       fmLoading: false,
-      // 已配对的映射 (按 sort_no 升序); 每条: { sourceField, targetField, path }
+      // 已配对的映射 (按 sort_no 升序); 每条: { sourceField, targetField, path, sx, sy, tx, ty }
       mappings: [],
-      // 当前未配对的源/目标字段 (从 sources 待合)
+      // 源/目标全部字段 (常驻渲染; 已配对置灰, 不从列表移除 - 保证连线锚点 DOM 一直存在)
       sourceFields: [],   // [{ name, type }]
       targetFields: [],   // [{ name, type }]
-      // 拖拽临时状态
-      drag: { active: false, startX: 0, startY: 0, curX: 0, curY: 0, srcName: '', path: '' },
+      // 连线层像素尺寸 (与 stage DOM 1:1, resize/滚动后刷新)
+      fmSize: { w: 600, h: 360 },
+      // 拖拽临时状态 (hoverName = 当前悬停的目标字段, 命中测试结果)
+      drag: { active: false, startX: 0, startY: 0, curX: 0, curY: 0, srcName: '', hoverName: '', path: '' },
       // 已保存的映射原始列表 (用于保存前检测变化)
       originalMappings: []
     }
   },
   computed: {
-    /** kettle 连线 SVG viewBox: 0..100 宽度, 高度自适应 */
-    fmViewBox () {
-      return '0 0 100 ' + Math.max(120, this.mappings.length * 24 + 40)
-    },
     mappingHint () {
       return '按 kettle 风格拖拽源字段到目标字段, 建立一对一字段重命名映射。' +
              '不建立映射 = 按源/目标字段同名同步(原行为, 老任务不受影响)。' +
@@ -353,6 +357,10 @@ export default {
     },
     'form.tableName' () {
       this.fetchColumns()
+    },
+    // 切到字段映射 tab 时: pane 刚渲染/弹窗尺寸刚稳定, 兜底重算一次连线
+    tabActive (val) {
+      if (val === 'mapping') this.initMappingStage()
     }
   },
   mounted () {
@@ -361,11 +369,14 @@ export default {
     this.startPolling()
     window.addEventListener('mousemove', this.onDocMouseMove)
     window.addEventListener('mouseup', this.onDocMouseUp)
+    window.addEventListener('resize', this.onWinResize)
   },
   beforeDestroy () {
     this.stopPolling()
     window.removeEventListener('mousemove', this.onDocMouseMove)
     window.removeEventListener('mouseup', this.onDocMouseUp)
+    window.removeEventListener('resize', this.onWinResize)
+    document.body.classList.remove('fm-dragging')
   },
   methods: {
     load () {
@@ -393,10 +404,10 @@ export default {
         ])
         this.sourceFields = (src.data || []).map(c => ({ name: c.columnName, type: c.dataType || c.columnType || '' }))
         this.targetFields = (tgt.data || []).map(c => ({ name: c.columnName, type: c.dataType || c.columnType || '' }))
-        this.rebuildMappingPaths()
+        this.initMappingStage()
       } catch (e) {
-        // 已配对的 path 也需要重算 (表格列数变化后 src/tgt 坐标会变)
-        this.rebuildMappingPaths()
+        // 列表可能已变, 连线层尺寸/路径也要重算
+        this.initMappingStage()
       } finally {
         this.fmLoading = false
       }
@@ -405,15 +416,8 @@ export default {
     clearMappings () {
       if (!this.mappings.length) return
       this.$confirm('确认清空当前任务的所有字段映射? 清空后回到"按字段名同名"同步 (老行为)。', '提示', { type: 'warning' })
-        .then(() => {
-          // 拆掉所有配对 -> 把字段送回 sourceFields/targetFields
-          const pairs = this.mappings.slice()
-          this.mappings = []
-          pairs.forEach(m => {
-            if (!this.sourceFields.some(f => f.name === m.sourceField)) this.sourceFields.push({ name: m.sourceField, type: '' })
-            if (!this.targetFields.some(f => f.name === m.targetField)) this.targetFields.push({ name: m.targetField, type: '' })
-          })
-        }).catch(() => {})
+        .then(() => { this.mappings = [] ; this.rebuildMappingPaths() })
+        .catch(() => {})
     },
 
     onAdd (type) {
@@ -432,12 +436,14 @@ export default {
       if (row.id) {
         listFieldMapping(row.id).then(r => {
           const list = r.data || []
-          // 把已配对映射写入 mappings; 不进 sourceFields/targetFields (从可选列表移除)
+          // 已配对映射写入 mappings; 字段列表保持全量渲染 (已配对行置灰), 连线锚点 DOM 一直存在
           this.mappings = list.map((m, i) => ({
             sourceField: m.sourceField, targetField: m.targetField, sortNo: m.sortNo == null ? i : m.sortNo,
             path: ''
           }))
           this.originalMappings = list.map(m => ({ sourceField: m.sourceField, targetField: m.targetField }))
+          // 映射已到: 立即重算连线 (fetchColumns 可能已先完成, 其 initMappingStage 时 mappings 还是空)
+          this.initMappingStage()
         }).catch(() => {})
       }
     },
@@ -445,6 +451,8 @@ export default {
       this.form = {}
       this.mappings = []; this.sourceFields = []; this.targetFields = []; this.originalMappings = []
       this.tabActive = 'base'
+      this.drag = { active: false, srcName: '', startX: 0, startY: 0, curX: 0, curY: 0, hoverName: '', path: '' }
+      document.body.classList.remove('fm-dragging')
     },
     /** tab 切换前: 仅校验当前 tab 内已填字段; mapping tab 自动 fetchColumns */
     onBeforeTabLeave (to, from) {
@@ -586,107 +594,125 @@ export default {
     isTgtMapped (n) { return this.mappings.some(m => m.targetField === n) },
 
     /**
-     * 取某源字段在 stage 中的"右边缘中点"坐标 (SVG viewBox 坐标: 0..100)
+     * 初始化连线层: 记录 stage 像素尺寸 (SVG viewBox 与 DOM 1:1, 避免百分比换算错位),
+     * 并给两栏列表挂滚动监听 (滚动会改变锚点位置, 需重算连线)
      */
+    initMappingStage () {
+      this.$nextTick(() => {
+        const stage = this.$refs.fmStage
+        if (!stage || !this.dialog) return
+        const r = stage.getBoundingClientRect()
+        if (r.width > 0 && r.height > 0) this.fmSize = { w: r.width, h: r.height }
+        stage.querySelectorAll('.fm-col-body').forEach(body => {
+          body.removeEventListener('scroll', this.onColScroll)
+          body.addEventListener('scroll', this.onColScroll)
+        })
+        this.rebuildMappingPaths()
+      })
+    },
+    onColScroll () { this.rebuildMappingPaths() },
+    onWinResize () {
+      if (this.dialog && this.tabActive === 'mapping') this.initMappingStage()
+    },
+
+    /** 某字段行边缘中点相对 stage 的像素坐标 */
+    anchorOf (el, side) {
+      const stage = this.$refs.fmStage
+      if (!stage || !el) return null
+      const s = stage.getBoundingClientRect()
+      const e = el.getBoundingClientRect()
+      return {
+        x: (side === 'right' ? e.right : e.left) - s.left,
+        y: e.top + e.height / 2 - s.top
+      }
+    },
     srcAnchor (name) {
       const stage = this.$refs.fmStage
-      if (!stage) return { x: 50, y: 20 }
-      const el = stage.querySelector('.fm-item-src[data-name="' + cssEscape(name) + '"]')
-      if (!el) return null
-      const sRect = stage.getBoundingClientRect()
-      const eRect = el.getBoundingClientRect()
-      return {
-        x: (eRect.right - sRect.left) / sRect.width * 100,
-        y: (eRect.top + eRect.height / 2 - sRect.top) / sRect.height * 100
-      }
+      if (!stage) return null
+      return this.anchorOf(stage.querySelector('.fm-item-src[data-name="' + cssEscape(name) + '"]'), 'right')
     },
     tgtAnchor (name) {
       const stage = this.$refs.fmStage
-      if (!stage) return { x: 50, y: 20 }
-      const el = stage.querySelector('.fm-item-tgt[data-name="' + cssEscape(name) + '"]')
-      if (!el) return null
-      const sRect = stage.getBoundingClientRect()
-      const eRect = el.getBoundingClientRect()
-      return {
-        x: (eRect.left - sRect.left) / sRect.width * 100,
-        y: (eRect.top + eRect.height / 2 - sRect.top) / sRect.height * 100
-      }
+      if (!stage) return null
+      return this.anchorOf(stage.querySelector('.fm-item-tgt[data-name="' + cssEscape(name) + '"]'), 'left')
     },
 
-    /** 计算每条已配对 mapping 的 svg 路径 (贝塞尔曲线) */
+    /** 贝塞尔连线: 水平控制点, 保证从锚点平滑伸出 */
+    bezier (s, t) {
+      const dx = Math.max(24, Math.abs(t.x - s.x) * 0.45)
+      return `M ${s.x} ${s.y} C ${s.x + dx} ${s.y}, ${t.x - dx} ${t.y}, ${t.x} ${t.y}`
+    },
+
+    /** 计算每条已配对 mapping 的 svg 路径 + 两端锚点 (像素) */
     rebuildMappingPaths () {
-      // 在 svg viewBox 里; x 是 src 右锚, x2 是 target 左锚
       this.mappings.forEach(m => {
         const s = this.srcAnchor(m.sourceField)
         const t = this.tgtAnchor(m.targetField)
-        if (!s || !t) { m.path = ''; return }
-        const dx = (t.x - s.x) * 0.5
-        m.path = `M ${s.x} ${s.y} C ${s.x + dx} ${s.y}, ${t.x - dx} ${t.y}, ${t.x} ${t.y}`
+        if (s && t) {
+          m.sx = s.x; m.sy = s.y; m.tx = t.x; m.ty = t.y
+          m.path = this.bezier(s, t)
+        } else {
+          m.path = ''
+        }
       })
     },
-    midX (m) {
-      const s = this.srcAnchor(m.sourceField); const t = this.tgtAnchor(m.targetField)
-      return (s && t) ? (s.x + t.x) / 2 : 50
-    },
-    midY (m) {
-      const s = this.srcAnchor(m.sourceField); const t = this.tgtAnchor(m.targetField)
-      return (s && t) ? (s.y + t.y) / 2 : 20
+    midX (m) { return (m.sx != null && m.tx != null) ? (m.sx + m.tx) / 2 : 0 },
+    midY (m) { return (m.sy != null && m.ty != null) ? (m.sy + m.ty) / 2 : 0 },
+
+    /**
+     * 命中测试: 指针坐标是否落在某个"未配对的目标字段行"上 (带容差).
+     * 不依赖元素自身的 mouseup —— 鼠标快速划过/SVG 覆盖层遮挡都不会丢事件
+     */
+    hitTestTarget (clientX, clientY) {
+      const stage = this.$refs.fmStage
+      if (!stage) return ''
+      const els = stage.querySelectorAll('.fm-item-tgt')
+      for (let i = 0; i < els.length; i++) {
+        const name = els[i].getAttribute('data-name')
+        if (!name || this.isTgtMapped(name)) continue
+        const r = els[i].getBoundingClientRect()
+        if (clientX >= r.left - 10 && clientX <= r.right + 10 &&
+            clientY >= r.top - 5 && clientY <= r.bottom + 5) {
+          return name
+        }
+      }
+      return ''
     },
 
     onSrcMouseDown (ev, field) {
-      // 已配对的字段不允许再拖
       if (this.isSrcMapped(field.name)) return
-      ev.preventDefault()
       const s = this.srcAnchor(field.name)
       if (!s) return
-      // 转换为 stage 相对坐标
-      const stage = this.$refs.fmStage
-      const sRect = stage.getBoundingClientRect()
-      const x = (ev.clientX - sRect.left) / sRect.width * 100
-      const y = (ev.clientY - sRect.top) / sRect.height * 100
-      this.drag = { active: true, srcName: field.name, startX: s.x, startY: s.y, curX: x, curY: y,
-                    path: `M ${s.x} ${s.y} C ${s.x + (x - s.x) / 2} ${s.y}, ${x - (x - s.x) / 2} ${y}, ${x} ${y}` }
+      ev.preventDefault()
+      this.drag = { active: true, srcName: field.name, startX: s.x, startY: s.y,
+                    curX: s.x, curY: s.y, hoverName: '', path: this.bezier(s, s) }
+      document.body.classList.add('fm-dragging')
     },
     onDocMouseMove (ev) {
       if (!this.drag.active) return
       const stage = this.$refs.fmStage
       if (!stage) return
       const sRect = stage.getBoundingClientRect()
-      const x = (ev.clientX - sRect.left) / sRect.width * 100
-      const y = (ev.clientY - sRect.top) / sRect.height * 100
+      const x = ev.clientX - sRect.left
+      const y = ev.clientY - sRect.top
       this.drag.curX = x; this.drag.curY = y
-      const s = { x: this.drag.startX, y: this.drag.startY }
-      const dx = (x - s.x) * 0.5
-      this.drag.path = `M ${s.x} ${s.y} C ${s.x + dx} ${s.y}, ${x - dx} ${y}, ${x} ${y}`
+      this.drag.path = this.bezier({ x: this.drag.startX, y: this.drag.startY }, { x, y })
+      this.drag.hoverName = this.hitTestTarget(ev.clientX, ev.clientY)
     },
-    onDocMouseUp () {
+    onDocMouseUp (ev) {
       if (!this.drag.active) return
-      // mouseup 在 target div 上由 onTgtMouseUp 处理, 这里只是收尾
-      this.drag.active = false
-      this.drag.path = ''
-      this.drag.srcName = ''
-    },
-    onTgtMouseUp (ev, field) {
-      // 只有拖拽过程中且未配对的释放点才接受
-      if (!this.drag.active) return
-      if (this.isTgtMapped(field.name)) return
-      // 形成配对
       const srcName = this.drag.srcName
-      if (!srcName || srcName === field.name) return
-      this.mappings.push({ sourceField: srcName, targetField: field.name, sortNo: this.mappings.length, path: '' })
-      // 从 sourceFields / targetFields 移除 (避免重复配对)
-      this.sourceFields = this.sourceFields.filter(f => f.name !== srcName)
-      this.targetFields = this.targetFields.filter(f => f.name !== field.name)
-      this.drag.active = false; this.drag.path = ''; this.drag.srcName = ''
+      // 松手瞬间再测一次, 以松手坐标为准 (兜底用最后一次 hover)
+      const tgtName = this.hitTestTarget(ev.clientX, ev.clientY) || this.drag.hoverName
+      this.drag = { active: false, srcName: '', startX: 0, startY: 0, curX: 0, curY: 0, hoverName: '', path: '' }
+      document.body.classList.remove('fm-dragging')
+      if (!srcName || !tgtName) return
+      if (this.isTgtMapped(tgtName) || this.isSrcMapped(srcName)) return
+      this.mappings.push({ sourceField: srcName, targetField: tgtName, sortNo: this.mappings.length, path: '' })
       this.$nextTick(() => this.rebuildMappingPaths())
     },
     removeMapping (i) {
-      const m = this.mappings[i]
-      if (!m) return
       this.mappings.splice(i, 1)
-      // 把字段送回可选列表
-      if (!this.sourceFields.some(f => f.name === m.sourceField)) this.sourceFields.push({ name: m.sourceField, type: '' })
-      if (!this.targetFields.some(f => f.name === m.targetField)) this.targetFields.push({ name: m.targetField, type: '' })
       this.$nextTick(() => this.rebuildMappingPaths())
     }
   }
@@ -740,12 +766,17 @@ function cssEscape (s) {
   left: 0; top: 0; width: 100%; height: 100%;
   pointer-events: none;
   z-index: 2;
+  overflow: visible;
 }
-.fm-svg .fm-line, .fm-svg .fm-line-drag { pointer-events: auto }
-.fm-line-path { stroke: #409EFF; stroke-width: 1.5; fill: none; opacity: 0.85 }
-.fm-line-drag { stroke: #67C23A; stroke-width: 1.5; fill: none; stroke-dasharray: 4 3 }
+/* 连线本体不响应鼠标 (防止挡住拖拽/悬停), 只有删除按钮可点 */
+.fm-svg .fm-line { pointer-events: none }
+.fm-svg .fm-line-close-bg, .fm-svg .fm-line-close-x { pointer-events: auto }
+.fm-line-path { stroke: #409EFF; stroke-width: 2; fill: none; opacity: 0.85 }
+.fm-line-drag { stroke: #67C23A; stroke-width: 2; fill: none; stroke-dasharray: 5 4 }
+.fm-line-dot { fill: #409EFF; stroke: #fff; stroke-width: 1 }
+.fm-line-dot.drag { fill: #67C23A }
 .fm-line-close-bg { fill: #fff; stroke: #F56C6C; stroke-width: 1; cursor: pointer }
-.fm-line-close-x  { fill: #F56C6C; font-size: 12px; cursor: pointer; font-family: Arial }
+.fm-line-close-x  { fill: #F56C6C; font-size: 13px; cursor: pointer; font-family: Arial }
 
 .fm-col { background: #fff; border: 1px solid #ebeef5; border-radius: 4px; overflow: hidden; z-index: 1 }
 .fm-col-head {
@@ -774,7 +805,10 @@ function cssEscape (s) {
 .fm-item:hover { background: #ecf5ff; border-color: #b3d8ff; }
 .fm-item-src:active { cursor: grabbing }
 .fm-item-tgt { cursor: default }
-.fm-item-dim { opacity: 0.35; cursor: not-allowed; background: #f5f7fa }
+.fm-item-dim { opacity: 0.45; cursor: not-allowed; background: #f5f7fa }
+/* 拖拽中: 源行高亮 (正在被拖) / 目标行绿色高亮 (可放置) */
+.fm-item-picking { background: #ecf5ff; border-color: #409EFF; box-shadow: 0 0 0 2px rgba(64,158,255,.2) }
+.fm-item-drop { background: #f0f9eb; border-color: #b3e19d; box-shadow: 0 0 0 2px rgba(103,194,58,.25) }
 .fm-item-name { font-weight: 500; color: #303133; font-family: Menlo, Consolas, monospace }
 .fm-item-type { color: #909399; font-size: 11px; margin-left: 8px }
 
@@ -783,4 +817,9 @@ function cssEscape (s) {
   display: flex; align-items: center; gap: 4px;
 }
 .fm-hint-row i { color: #409EFF }
+</style>
+
+<style>
+/* 拖拽连线时全局十字光标 (非 scoped: body 不在组件树内) */
+body.fm-dragging, body.fm-dragging * { cursor: crosshair !important }
 </style>
