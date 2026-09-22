@@ -301,11 +301,31 @@ SET GLOBAL binlog_format = 'ROW';
 
 ## 十二、效果图
 
-![输入图片说明](image/sql-workbench.png)
+### 首页
 
-![输入图片说明](image/sync-task.png)
+![首页](image/首页.png)
 
-![输入图片说明](image/sync-log.png)
+### SQL 工作台
+
+![SQL 工作台](image/sql-workbench.png)
+
+![SQL 工作台升级版](image/sql工作台升级.png)
+
+### 任务大盘
+
+![任务大盘](image/任务大盘.png)
+
+### 同步任务
+
+![同步任务](image/sync-task.png)
+
+### 字段映射 (kettle 风格连线拖拽)
+
+![字段映射](image/字段映射.png)
+
+### 同步日志
+
+![同步日志](image/sync-log.png)
 
 ## 十三、压测效果图
 
