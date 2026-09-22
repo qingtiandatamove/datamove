@@ -343,6 +343,11 @@ public class FullSyncEngine {
      * 稀疏主键(大量空洞)时分片行数不均, 自增主键下最均匀。
      * 空表/异常时返回空列表, 调用方回退单线程。
      */
+    /**
+     * 分片区间划分：先查 MIN/MAX, 再按 id 均分成 shardCount 段。
+     * 区间计算本身无副作用, 抽到 RangeSplitter 便于单测。
+     * 空表/异常时返回空列表, 调用方回退单线程。
+     */
     private List<long[]> splitByIdRange(SyncContext ctx, String table, String idField, int shardCount) {
         List<long[]> ranges = new ArrayList<>();
         String sql = "SELECT MIN(`" + idField + "`), MAX(`" + idField + "`) FROM `" + table + "`";
@@ -355,17 +360,7 @@ public class FullSyncEngine {
             if (!(minO instanceof Number) || !(maxO instanceof Number)) return ranges;
             long min = ((Number) minO).longValue();
             long max = ((Number) maxO).longValue();
-            long width = (max - min) / shardCount + 1;
-            if (width <= 0) {
-                ranges.add(new long[]{min, max});
-                return ranges;
-            }
-            for (int k = 0; k < shardCount; k++) {
-                long lo = min + (long) k * width;
-                if (lo > max) break;
-                long hi = k == shardCount - 1 ? max : Math.min(lo + width - 1, max);
-                ranges.add(new long[]{lo, hi});
-            }
+            ranges = com.ruoyi.datamove.common.RangeSplitter.split(min, max, shardCount);
         } catch (Exception e) {
             log.warn("[Sync] task[{}] 分片区间划分失败, 回退单线程: {}", ctx.getTask().getTaskName(), e.getMessage());
         }

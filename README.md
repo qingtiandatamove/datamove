@@ -2,6 +2,14 @@
 
 > 基于 **RuoYi-Vue 4.8.1 最新版** 前后端分离框架开发的 MySQL 专属数据同步工具
 
+## 文档目录
+
+| 文档 | 适合谁 |
+|---|---|
+| [QUICKSTART.md](QUICKSTART.md) | **第一次接触, 想 5 分钟跑起来** — 含同类工具对比表 + 不适用场景 |
+| [LICENSING.md](LICENSING.md) | 想了解"哪些代码开源 / 哪些是商业付费 / 当前 LicenseService 怎么配"的人 |
+| 本 README | 完整功能说明 + 部署 + 高级用法 |
+
 
 ## 一、产品定位
 

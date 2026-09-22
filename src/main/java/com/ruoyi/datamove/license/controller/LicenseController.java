@@ -7,11 +7,19 @@ import com.ruoyi.datamove.license.domain.SyncLicense;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.web.bind.annotation.*;
 
+/**
+ * License 管理接口 (opt-in)。
+ *
+ * <p>仅在 {@code sync.license.enabled=true} 时注册; 否则路由不存在 (404),
+ * 前端菜单会进入「模块未启用」占位提示。
+ */
 @Api(tags = "License 授权管理")
 @RestController
 @RequestMapping("/sync/license")
+@ConditionalOnProperty(name = "sync.license.enabled", havingValue = "true")
 public class LicenseController {
 
     @Autowired

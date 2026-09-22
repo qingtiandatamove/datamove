@@ -73,9 +73,15 @@ sync:
   aes-key: ${SYNC_AES_KEY:CHANGE_ME_16_BYTES_KEY}
   # 钉钉告警开启
   dingtalk-enabled: true
-  # License 服务地址
+  # ====================================================================
+  # License 授权总闸: false (开源模式) 时, LicenseService 与 LicenseController
+  # 都未被 Spring 实例化, 启动期没有任何授权检查, 适合 OSS 场景。
+  # 商业部署需要启用授权时, 改为 true 并配置下方 license-server/license-key。
+  # ====================================================================
+  license-enabled: false
+  # License 服务地址 (仅 license-enabled=true 时生效)
   license-server: https://license.datamove.com/check
-  # LicenseKey(通过环境变量 SYNC_LICENSE_KEY 注入真实授权码)
+  # LicenseKey(仅 license-enabled=true 时生效, 通过环境变量 SYNC_LICENSE_KEY 注入真实授权码)
   license-key: ${SYNC_LICENSE_KEY:CHANGE_ME_LICENSE_KEY}
   # 内部通信密钥 (通过环境变量 INNER_SECRET 注入真实值)
   inner-secret: ${INNER_SECRET:CHANGE_ME_INNER_SECRET}

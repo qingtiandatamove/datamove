@@ -7,6 +7,7 @@ import com.ruoyi.datamove.license.mapper.SyncLicenseMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.stereotype.Service;
@@ -20,15 +21,22 @@ import java.time.ZoneId;
 import java.util.Date;
 
 /**
- * License 授权服务
+ * License 授权服务 (opt-in)
  *
- * 对应文档 3.5:
- *  - 仅项目启动时联网校验一次,运行时可断网
- *  - 校验维度: LicenseKey合法性 + MAC地址绑定 + 到期时间
- *  - 过期后重启项目无法启动
+ * <p>本类仅在 {@code sync.license.enabled=true} 时由 Spring 实例化,
+ * 默认 {@code false} 时整个授权链路完全不存在 —— 没有启动校验, 没有 MAC 绑定,
+ * 也没有 {@code System.exit(1)}。适合开源场景下的零阻碍体验。
+ *
+ * <p>启用时 (对应文档 3.5):
+ * <ul>
+ *   <li>仅项目启动时联网校验一次,运行时可断网</li>
+ *   <li>校验维度: LicenseKey 合法性 + MAC 地址绑定 + 到期时间</li>
+ *   <li>过期后重启项目无法启动</li>
+ * </ul>
  */
 @Slf4j
 @Service
+@ConditionalOnProperty(name = "sync.license.enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class LicenseService {
 
@@ -43,7 +51,10 @@ public class LicenseService {
     private volatile boolean allowed = true;
 
     /**
-     * 启动时校验
+     * 启动时校验。
+     *
+     * <p>本类已被 {@code @ConditionalOnProperty(sync.license.enabled=true)} 限定, 默认配置下根本不会被实例化,
+     * 该方法也根本不会被注册 / 调用。 启用后的语义仍按旧版: 启动期一次性校验, 不通过则 {@code System.exit(1)}。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void verifyOnStartup() {
