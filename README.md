@@ -323,10 +323,6 @@ SET GLOBAL binlog_format = 'ROW';
 
 ![字段映射](image/字段映射.png)
 
-**动态演示** —— 按住源字段拖拽到目标字段建立映射, 连线中点的 × 可删除:
-
-![字段映射动画](image/字段映射动画.gif)
-
 ### 同步日志
 
 ![同步日志](image/sync-log.png)
