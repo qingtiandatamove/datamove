@@ -27,12 +27,19 @@ import java.util.Date;
  * 默认 {@code false} 时整个授权链路完全不存在 —— 没有启动校验, 没有 MAC 绑定,
  * 也没有 {@code System.exit(1)}。适合开源场景下的零阻碍体验。
  *
- * <p>启用时 (对应文档 3.5):
+ * <p><b>【临时禁用】</b>启动期校验逻辑 ({@link #verifyOnStartup()}) 已按需求整体注释,
+ * 当前无论开关如何都不会拦截启动。恢复方式: 取消该方法内的块注释, 并删除本段说明。
+ *
+ * <p>原设计 (对应文档 3.5):
  * <ul>
  *   <li>仅项目启动时联网校验一次,运行时可断网</li>
  *   <li>校验维度: LicenseKey 合法性 + MAC 地址绑定 + 到期时间</li>
  *   <li>过期后重启项目无法启动</li>
  * </ul>
+ *
+ * <p>注: 下方 MacUtils / HttpURLConnection / URL / StandardCharsets / Duration /
+ * LocalDateTime / ZoneId / Date 等 import 目前仅被注释掉的校验逻辑引用 (get/update 仍用
+ * QueryWrapper 与 licenseMapper), 保留以便恢复, 不影响编译。
  */
 @Slf4j
 @Service
@@ -51,13 +58,16 @@ public class LicenseService {
     private volatile boolean allowed = true;
 
     /**
-     * 启动时校验。
+     * 启动时校验 —— 【临时禁用】
      *
-     * <p>本类已被 {@code @ConditionalOnProperty(sync.license.enabled=true)} 限定, 默认配置下根本不会被实例化,
-     * 该方法也根本不会被注册 / 调用。 启用后的语义仍按旧版: 启动期一次性校验, 不通过则 {@code System.exit(1)}。
+     * <p>按需求暂时去掉 License 校验: 原逻辑整体以块注释保留, 需要恢复时取消下方注释即可。
+     * 本类另受 {@code @ConditionalOnProperty(sync.license.enabled=true)} 约束,
+     * 默认配置 (sync.license.enabled=false) 下不会被实例化, 此处的注释是第二重保险。
      */
     @EventListener(ApplicationReadyEvent.class)
     public void verifyOnStartup() {
+        log.info("License: 启动期校验已临时禁用 (代码注释), 跳过校验, 不影响启动");
+        /*
         try {
             log.info("License: 开始启动期校验...");
             String mac = MacUtils.getLocalMac();
@@ -116,8 +126,10 @@ public class LicenseService {
         } catch (Exception e) {
             log.error("License 系统异常,允许启动以进行本地试用", e);
         }
+        */
     }
 
+    /*
     private void verifyOnline(SyncLicense license, String mac) throws Exception {
         // 这里演示如何调用云端校验:http POST {key, mac}
         // 实际环境根据 License Service 接口文档对接
@@ -136,6 +148,7 @@ public class LicenseService {
         conn.disconnect();
         log.info("License 在线校验返回 code={}", code);
     }
+    */
 
     public SyncLicense get() {
         return licenseMapper.selectOne(
