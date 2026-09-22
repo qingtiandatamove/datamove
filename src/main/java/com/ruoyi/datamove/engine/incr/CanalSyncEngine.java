@@ -375,7 +375,9 @@ public class CanalSyncEngine {
                                         appendContent(contentSb, "INSERT",
                                                 remapColumns(ctx, rd.getAfterColumnsList()), null, ctx);
                                     } else if (type == CanalEntry.EventType.UPDATE) {
-                                        applyUpdate(tgt, table, ctx, rd.getAfterColumnsList());
+                                        // before 列用于精确定位旧行(主键/唯一键变更时必须), 不能只传 after
+                                        applyUpdate(tgt, table, ctx,
+                                                rd.getAfterColumnsList(), rd.getBeforeColumnsList());
                                         updates++;
                                         appendContent(contentSb, "UPDATE",
                                                 remapColumns(ctx, rd.getAfterColumnsList()),
@@ -501,6 +503,15 @@ public class CanalSyncEngine {
 
         /* ============ DML 应用 (支持映射重写 column name) ============ */
 
+        /** 绑定单个参数: Canal 对 NULL 列返回空串, 必须显式 setNull */
+        private void setColumn(PreparedStatement ps, int idx, CanalEntry.Column col) throws Exception {
+            if (col.getIsNull()) {
+                ps.setNull(idx, java.sql.Types.NULL);
+            } else {
+                ps.setObject(idx, col.getValue());
+            }
+        }
+
         private void applyInsert(SyncDatasource ds, String table, SyncContext ctx,
                                  List<CanalEntry.Column> rawCols) throws Exception {
             // 按字段映射重写列名 (不破坏数据, 仅改列名)
@@ -518,46 +529,106 @@ public class CanalSyncEngine {
             try (Connection c = JdbcUtils.getConnection(ds);
                  PreparedStatement ps = c.prepareStatement(sql.toString())) {
                 for (int i = 0; i < cols.size(); i++) {
-                    CanalEntry.Column col = cols.get(i);
-                    // Canal 对 NULL 列返回的是空串,必须显式 setNull,
-                    // 否则 int/decimal/datetime 等列会报 "Incorrect integer value: ''"
-                    if (col.getIsNull()) {
-                        ps.setNull(i + 1, java.sql.Types.NULL);
-                    } else {
-                        ps.setObject(i + 1, col.getValue());
-                    }
+                    setColumn(ps, i + 1, cols.get(i));
                 }
                 ps.executeUpdate();
             }
         }
 
+        /**
+         * UPDATE: 用 before 的 key 列**精确定位**目标行后更新。
+         *
+         * <p>修复前直接复用 {@code applyInsert}, 只在"key 值未变"时才碰巧正确:
+         * <ul>
+         *   <li>源库改了主键/唯一键值 (UPDATE t SET id=5 WHERE id=3): ON DUPLICATE KEY UPDATE
+         *       找不到 id=5 便走 INSERT, 旧行 id=3 残留成僵尸行</li>
+         *   <li>目标表没有主键/唯一键: ON DUPLICATE KEY UPDATE 完全失效, 退化成裸 INSERT,
+         *       每条 UPDATE 都插一行新数据, 重跑即翻倍</li>
+         * </ul>
+         *
+         * <p>改为按 before key 定位后, 三条分支各司其职:
+         * <ul>
+         *   <li>命中 1 行 → 正常更新 (key 值变更也能落库: SET k=新值 WHERE k=旧值)</li>
+         *   <li>命中 0 行 → 目标行缺失 (同步从中间开始 / 被手工删掉), 退化为 upsert 补齐</li>
+         *   <li>命中 &gt;1 行 → WHERE 不唯一, 目标表 key 结构有问题, 记 WARN 便于排查</li>
+         * </ul>
+         */
         private void applyUpdate(SyncDatasource ds, String table, SyncContext ctx,
-                                 List<CanalEntry.Column> rawCols) throws Exception {
-            // 文档未强制要求幂等,这里为简化复用 INSERT,注意 Update 用 REPLACE 更合理
-            applyInsert(ds, table, ctx, rawCols);
+                                 List<CanalEntry.Column> rawAfter,
+                                 List<CanalEntry.Column> rawBefore) throws Exception {
+            List<CanalEntry.Column> after = remapColumns(ctx, rawAfter);
+            if (after == null || after.isEmpty()) return;
+
+            List<CanalEntry.Column> beforeKeys = CanalRowKeys.keyColumns(remapColumns(ctx, rawBefore));
+            if (beforeKeys.isEmpty()) {
+                // before 里没有 key 列 (源表无主键 / binlog 未带 before 列): 无法定位旧行,
+                // 只能退化为 upsert —— 与修复前行为一致, 但要留下痕迹
+                log.warn("[IncrSync] UPDATE event has no key column, fallback to upsert, table={}", table);
+                applyInsert(ds, table, ctx, rawAfter);
+                return;
+            }
+
+            StringBuilder sql = new StringBuilder("UPDATE `").append(table).append("` SET ");
+            for (int i = 0; i < after.size(); i++) {
+                sql.append("`").append(after.get(i).getName()).append("`=?")
+                   .append(i < after.size() - 1 ? "," : "");
+            }
+            sql.append(" WHERE ").append(CanalRowKeys.buildWhere(beforeKeys));
+
+            int affected;
+            try (Connection c = JdbcUtils.getConnection(ds);
+                 PreparedStatement ps = c.prepareStatement(sql.toString())) {
+                int idx = 1;
+                for (CanalEntry.Column col : after) setColumn(ps, idx++, col);
+                for (CanalEntry.Column k : beforeKeys) ps.setObject(idx++, k.getValue());
+                affected = ps.executeUpdate();
+            }
+
+            if (affected == 0) {
+                // 目标库没有这一行(同步从中间开始 / 行被手工删掉): 补插, 避免数据缺失
+                log.warn("[IncrSync] UPDATE matched 0 row, target row missing, fallback to upsert, table={}, key=[{}]",
+                        table, CanalRowKeys.names(beforeKeys));
+                applyInsert(ds, table, ctx, rawAfter);
+            } else if (affected > 1) {
+                log.warn("[IncrSync] UPDATE matched {} rows (>1), target key is not unique, table={}, key=[{}]",
+                        affected, table, CanalRowKeys.names(beforeKeys));
+            }
         }
 
+        /**
+         * DELETE: 按 before 的**全部** key 列定位并删除。
+         *
+         * <p>修复前只取第一个 key 列 ({@code for (...) if (isKey) { pk = c; break; }}),
+         * 复合主键表 (order_id, item_id) 会退化成 {@code WHERE order_id = ?},
+         * 把该 order_id 下的**所有**明细行一并删掉; 且 executeUpdate() 的返回值被丢弃,
+         * 删多了不留任何痕迹。
+         */
         private void applyDelete(SyncDatasource ds, String table, SyncContext ctx,
                                  List<CanalEntry.Column> rawCols) throws Exception {
             // 字段映射: PK 列名也要重命名 (源 PK 列名 -> 目标 PK 列名)
-            List<CanalEntry.Column> cols = remapColumns(ctx, rawCols);
-
-            // 取主键的简化: 取第一个 key=PRI 的列
-            CanalEntry.Column pk = null;
-            for (CanalEntry.Column c : cols) if (c.getIsKey()) { pk = c; break; }
-            if (pk == null) {
-                log.warn("[IncrSync] no pk column found, skip delete");
+            List<CanalEntry.Column> keys = CanalRowKeys.keyColumns(remapColumns(ctx, rawCols));
+            if (keys.isEmpty()) {
+                log.warn("[IncrSync] DELETE event has no key column, skip, table={}", table);
                 return;
             }
-            String sql = "DELETE FROM `" + table + "` WHERE `" + pk.getName() + "` = ?";
-            try (Connection c = JdbcUtils.getConnection(ds);
-                 PreparedStatement ps = c.prepareStatement(sql)) {
-                if (pk.getIsNull()) {
-                    log.warn("[IncrSync] pk is null, skip delete");
+            for (CanalEntry.Column k : keys) {
+                if (k.getIsNull()) {
+                    log.warn("[IncrSync] DELETE key column [{}] is null, skip, table={}", k.getName(), table);
                     return;
                 }
-                ps.setObject(1, pk.getValue());
-                ps.executeUpdate();
+            }
+
+            String sql = "DELETE FROM `" + table + "` WHERE " + CanalRowKeys.buildWhere(keys);
+            try (Connection c = JdbcUtils.getConnection(ds);
+                 PreparedStatement ps = c.prepareStatement(sql)) {
+                int idx = 1;
+                for (CanalEntry.Column k : keys) ps.setObject(idx++, k.getValue());
+                int affected = ps.executeUpdate();
+                if (affected > 1) {
+                    // 复合主键漏拼 / 目标表 key 不唯一 的明确信号, 必须留痕
+                    log.warn("[IncrSync] DELETE matched {} rows (>1), target key is not unique, table={}, key=[{}]",
+                            affected, table, CanalRowKeys.names(keys));
+                }
             }
         }
     }
