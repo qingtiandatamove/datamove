@@ -48,6 +48,16 @@ public interface ISyncTaskService {
 
     /* 日志 */
     PageResult<SyncTaskLog> logs(Long taskId, String status, int pageNum, int pageSize);
-    void clearLog(Long taskId);
-    void clearAllLog();
+
+    /**
+     * 清理某个任务的同步日志
+     *
+     * @param taskId     任务 ID
+     * @param beforeDays 为空或 <=0 时清理该任务全部日志; 否则只清理 N 天前(更早)的历史日志
+     * @return 实际删除条数
+     */
+    int clearLog(Long taskId, Integer beforeDays);
+
+    /** 清空全部任务的同步日志 (慎用), 返回删除条数 */
+    int clearAllLog();
 }

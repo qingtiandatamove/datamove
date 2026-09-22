@@ -24,6 +24,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -233,13 +234,24 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     }
 
     @Override
-    public void clearLog(Long taskId) {
-        logMapper.delete(new QueryWrapper<SyncTaskLog>().eq("task_id", taskId));
+    public int clearLog(Long taskId, Integer beforeDays) {
+        if (taskId == null) throw new RuntimeException("任务 ID 不能为空");
+        QueryWrapper<SyncTaskLog> wrapper = new QueryWrapper<>();
+        wrapper.eq("task_id", taskId);
+        if (beforeDays != null && beforeDays > 0) {
+            // 保留最近 N 天: 删除 (N-1) 天前零点之前的日志, 即今天与最近 N-1 天保留
+            wrapper.lt("create_time", LocalDate.now().minusDays(beforeDays - 1).atStartOfDay());
+        }
+        int deleted = logMapper.delete(wrapper);
+        log.info("[clearLog] taskId={} beforeDays={} deleted={}", taskId, beforeDays, deleted);
+        return deleted;
     }
 
     @Override
-    public void clearAllLog() {
-        logMapper.delete(new QueryWrapper<>());
+    public int clearAllLog() {
+        int deleted = logMapper.delete(new QueryWrapper<>());
+        log.warn("[clearLog] 已清空全部任务日志, deleted={}", deleted);
+        return deleted;
     }
 
     /* ============ 任务大盘 ============ */

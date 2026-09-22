@@ -8,6 +8,7 @@ import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.mapper.SyncTaskLogMapper;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
@@ -25,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
+@Slf4j
 @Api(tags = "同步日志")
 @RestController
 @RequestMapping("/sync/log")
@@ -142,6 +144,49 @@ public class SyncLogController {
             os.write(sb.toString().getBytes(StandardCharsets.UTF_8));
             os.flush();
         }
+    }
+
+    /**
+     * 按筛选条件清理日志 (分页/统计/导出 同款条件, 保证"筛出来的"就是"能清掉的")
+     *
+     * 安全约束: 至少给一个条件 (任务/状态/关键字/时间/保留天数), 否则必须 force=true,
+     * 避免误点导致全表日志被清空。
+     *
+     * @param beforeDays 保留最近 N 天, 只清理更早的历史日志; 传了就忽略 endTime
+     * @param force      无条件时是否允许全量清理
+     * @return 实际删除条数
+     */
+    @ApiOperation("清理日志(按筛选条件, 无条件需 force=true)")
+    @DeleteMapping("/clear")
+    public R<Integer> clear(@RequestParam(required = false) Long taskId,
+                            @RequestParam(required = false) String taskName,
+                            @RequestParam(required = false) String tableName,
+                            @RequestParam(required = false) String status,
+                            @RequestParam(required = false) Integer shardNo,
+                            @RequestParam(required = false) Integer batchNo,
+                            @RequestParam(required = false) String keyword,
+                            @RequestParam(required = false) Boolean hasError,
+                            @RequestParam(required = false) String beginTime,
+                            @RequestParam(required = false) String endTime,
+                            @RequestParam(required = false) Integer beforeDays,
+                            @RequestParam(required = false, defaultValue = "false") boolean force) {
+        boolean keepRecent = beforeDays != null && beforeDays > 0;
+        // 保留最近 N 天: 用 "< (N-1) 天前零点" 收口, 不能走 buildWrapper 的 endTime (按天会补到 23:59:59, 会少留一天)
+        QueryWrapper<SyncTaskLog> w = buildWrapper(taskId, taskName, tableName, status,
+                shardNo, batchNo, keyword, hasError, beginTime, keepRecent ? null : endTime);
+        if (keepRecent) {
+            w.lt("create_time", LocalDate.now().minusDays(beforeDays - 1).atStartOfDay());
+        }
+        boolean hasCondition = taskId != null || notBlank(taskName) || notBlank(tableName) || notBlank(status)
+                || shardNo != null || batchNo != null || notBlank(keyword) || Boolean.TRUE.equals(hasError)
+                || notBlank(beginTime) || notBlank(endTime) || keepRecent;
+        if (!hasCondition && !force) {
+            throw new RuntimeException("未指定任何清理条件, 已取消; 如需清空全部日志请勾选「清空全部」");
+        }
+        int deleted = logMapper.delete(w);
+        log.info("[clearLog] 条件清理日志 deleted={} taskId={} status={} beforeDays={} force={}",
+                deleted, taskId, status, beforeDays, force);
+        return R.ok(deleted, "已清理 " + deleted + " 条日志");
     }
 
     /**

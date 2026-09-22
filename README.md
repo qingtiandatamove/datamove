@@ -78,7 +78,7 @@ datamove/
 │   │   ├── full/                 #   - 全量同步 (ID+Time 双模式+断点续传+幂等)
 │   │   ├── incr/                 #   - Canal 增量同步
 │   │   └── log/                  #   - 异步日志
-│   ├── log/                      # 日志 Controller(导出 CSV)
+│   ├── log/                      # 日志 Controller(列表/统计/导出 CSV/清理)
 │   └── common/                   # 全局异常处理
 ├── src/main/resources/
 │   ├── application.yml
@@ -106,7 +106,9 @@ datamove/
   - **按时间字段** (`WHERE time > #{lastTime} OR (time = #{lastTime} AND id > #{lastIdInBatch}) ORDER BY time ASC, id ASC LIMIT ...`)
 - **断点续传**:整批 `INSERT ... ON DUPLICATE KEY UPDATE` 成功后才更新断点
 - **幂等防重**:任务重跑不产生脏数据
-- 任务操作:启动 / 暂停 / 继续 / 终止 / 查看日志
+- 任务操作:启动 / 暂停 / 继续 / 终止 / 重置进度 / 查看日志 / **清理日志**
+- **日志清理**:行内「清日志」一键清空该任务日志; 顶部「日志清理」可按 任务 / 状态 / 保留天数 批量清理,
+  也可勾选「清空全部」(需二次确认); 清理前后端都返回实际删除条数, 任务配置与断点进度不受影响
 - **单实例保护**:同一任务只能有一个 worker 在跑
 - **任务大盘** (`/sync/dashboard`):实时展示每个任务的 **行/秒**(10s 滑动窗口)、
   **ETA**(按源表总行数估算)、**当前批次**、**瓶颈库**(源库读取 对比 目标库写入耗时)、

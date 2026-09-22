@@ -7,6 +7,7 @@
           <el-button type="primary" icon="el-icon-plus" size="mini" @click="onAdd('FULL')">新建全量任务</el-button>
           <el-button type="success" icon="el-icon-plus" size="mini" @click="onAdd('INCR')">新建增量任务</el-button>
           <el-button type="warning" icon="el-icon-plus" size="mini" @click="onAdd('DDL')">同步表结构</el-button>
+          <el-button type="danger" plain icon="el-icon-delete" size="mini" @click="openClearDialog">日志清理</el-button>
         </el-button-group>
       </div>
 
@@ -64,8 +65,8 @@
         <el-table-column prop="createTime" label="创建时间" width="170" sortable="custom" :sort-orders="['descending','ascending']">
           <template slot-scope="s">{{ fmtTime(s.row.createTime) }}</template>
         </el-table-column>
-        <!-- 操作列: 按钮平铺, 通过去 icon + CSS 收紧 padding 减少宽度; 列宽按 FULL/INCR 7 按钮自然宽 -->
-        <el-table-column label="操作" min-width="420">
+        <!-- 操作列: 按钮平铺, 通过去 icon + CSS 收紧 padding 减少宽度; 列宽按 FULL/INCR 8 按钮自然宽 -->
+        <el-table-column label="操作" min-width="470">
           <template slot-scope="s">
             <!-- DDL 类型: 单次操作, 不支持暂停/继续/停止 -->
             <template v-if="s.row.taskType === 'DDL'">
@@ -75,6 +76,7 @@
                 {{ s.row.status === 'COMPLETED' ? '再次同步' : (s.row.status === 'FAILED' ? '重试' : '同步表结构') }}
               </el-button>
               <el-button size="mini" @click="onLog(s.row)">日志</el-button>
+              <el-button size="mini" type="danger" plain @click="onClearTaskLog(s.row)">清日志</el-button>
               <el-button size="mini" type="primary" @click="onEdit(s.row)">编辑</el-button>
               <el-button size="mini" type="danger" @click="onDel(s.row)">删除</el-button>
             </template>
@@ -96,6 +98,7 @@
                 :disabled="s.row.status === 'RUNNING'"
                 @click="onReset(s.row)">重置</el-button>
               <el-button size="mini" @click="onLog(s.row)">日志</el-button>
+              <el-button size="mini" type="danger" plain @click="onClearTaskLog(s.row)">清日志</el-button>
               <el-button size="mini" type="primary" @click="onEdit(s.row)">编辑</el-button>
               <el-button size="mini" type="danger" @click="onDel(s.row)">删除</el-button>
             </template>
@@ -306,6 +309,44 @@
       <el-pagination style="margin-top:10px" background layout="prev, pager, next, total"
         :total="logPage.total" :page-size="logQuery.pageSize"
         :current-page.sync="logQuery.pageNum" @current-change="loadLogs" />
+      <div slot="footer">
+        <el-button type="danger" plain size="small" icon="el-icon-delete" @click="onClearTaskLogById(taskLogId)">清理该任务日志</el-button>
+        <el-button size="small" @click="logDialog = false">关 闭</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- 日志清理弹窗: 按条件批量清理 (与同步日志页的筛选口径一致) -->
+    <el-dialog title="日志清理" :visible.sync="clearDialog" width="560px">
+      <el-alert type="warning" :closable="false" show-icon
+        title="清理后不可恢复"
+        description="只删除 sync_task_log 里的历史日志, 任务配置、断点进度和数据源都不受影响; 运行中的任务会继续写入新日志。"/>
+      <el-form :model="clearForm" label-width="90px" style="margin-top:14px">
+        <el-form-item label="清理任务">
+          <el-select v-model="clearForm.taskId" clearable filterable placeholder="全部任务" style="width:100%">
+            <el-option v-for="t in page.rows" :key="t.id" :value="t.id" :label="`[${t.id}] ${t.taskName}`" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="日志状态">
+          <el-select v-model="clearForm.status" clearable placeholder="全部状态" style="width:100%" :disabled="clearForm.all">
+            <el-option label="仅成功 (SUCCESS)" value="SUCCESS" />
+            <el-option label="仅失败 (FAILED)" value="FAILED" />
+            <el-option label="仅运行中 (RUNNING)" value="RUNNING" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="保留天数">
+          <el-input-number v-model="clearForm.beforeDays" :min="1" :max="3650" :disabled="clearForm.all" />
+          <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+            只清理 {{ clearForm.beforeDays }} 天前(含更早)的历史日志, 今天与最近 {{ clearForm.beforeDays - 1 }} 天的日志保留
+          </div>
+        </el-form-item>
+        <el-form-item label="清空全部">
+          <el-checkbox v-model="clearForm.all">忽略上面的状态与保留天数, 清空{{ clearForm.taskId ? '该任务' : '全部任务' }}的所有日志</el-checkbox>
+        </el-form-item>
+      </el-form>
+      <div slot="footer">
+        <el-button @click="clearDialog = false">取 消</el-button>
+        <el-button type="danger" icon="el-icon-delete" :loading="clearing" @click="onClearConfirm">确认清理</el-button>
+      </div>
     </el-dialog>
   </div>
 </template>
@@ -313,6 +354,7 @@
 <script>
 import { pageTask, addTask, updateTask, deleteTask,
          startTask, pauseTask, resumeTask, stopTask, resetTask, pageLog,
+         clearTaskLog, clearLogByFilter,
          listDataSource, listTables, listColumns,
          listFieldMapping, saveFieldMapping, clearFieldMapping } from '@/api/datamove'
 
@@ -335,6 +377,9 @@ export default {
       datasources: [], sourceTables: [],
       logDialog: false, logLoading: false, taskLogId: 0,
       logQuery: { pageNum: 1, pageSize: 10 }, logPage: { rows: [], total: 0 },
+      // 日志清理弹窗 (按条件批量清理)
+      clearDialog: false, clearing: false,
+      clearForm: { taskId: '', status: '', beforeDays: 30, all: false },
       pollTimer: null, refreshing: false,
 
       /* ============ 字段映射 ============ */
@@ -574,6 +619,66 @@ export default {
     loadLogs () {
       this.logLoading = true
       pageLog({ ...this.logQuery, taskId: this.taskLogId }).then(r => { this.logPage = r.data }).catch(() => {}).finally(() => this.logLoading = false)
+    },
+
+    /* ============ 日志清理 ============ */
+
+    onClearTaskLog (row) { if (row && row.id) this.onClearTaskLogById(row.id) },
+
+    /** 清理单个任务的全部日志 (行内「清日志」按钮 / 日志弹窗底部按钮共用) */
+    onClearTaskLogById (taskId) {
+      if (!taskId) return
+      const row = (this.page.rows || []).find(r => r.id === taskId)
+      const name = row ? row.taskName : ('ID=' + taskId)
+      const running = row && row.status === 'RUNNING' ? '\n注意: 任务正在运行, 清理后本次运行的新日志会继续写入。' : ''
+      this.$confirm(`确认清理任务【${name}】的全部同步日志?\n清理后不可恢复; 任务配置与断点进度不受影响。${running}`, '清理日志', {
+        type: 'warning', confirmButtonText: '清理全部', cancelButtonText: '取消'
+      })
+        .then(() => clearTaskLog(taskId))
+        .then(r => this.afterCleared(r, taskId))
+        .catch(() => {})
+    },
+
+    openClearDialog () {
+      this.clearForm = { taskId: '', status: '', beforeDays: 30, all: false }
+      this.clearDialog = true
+    },
+
+    /** 弹窗确认: 按条件批量清理 (可选任务/状态/保留天数, 或直接全部清空) */
+    onClearConfirm () {
+      const f = this.clearForm
+      const params = {}
+      if (f.all) {
+        // 选了任务 = 条件清理; 没选任务 = 全表清理, 靠后端 force 开关兜底
+        if (f.taskId) params.taskId = f.taskId
+        else params.force = true
+      } else {
+        params.beforeDays = f.beforeDays || 30
+        if (f.taskId) params.taskId = f.taskId
+        if (f.status) params.status = f.status
+      }
+      const scope = (f.taskId ? '所选任务' : '全部任务') +
+        (f.all ? ' 的所有日志' : ` 中 ${f.beforeDays} 天前(含更早)的日志`)
+      const tip = (f.all && !f.taskId)
+        ? { title: '高风险操作', type: 'error', confirmButtonText: '我已确认', text: `将清空${scope}, 此操作不可恢复, 确认继续?` }
+        : { title: '清理日志', type: 'warning', confirmButtonText: '确认清理', text: `确认清理${scope}? 清理后不可恢复。` }
+      this.$confirm(tip.text, tip.title, { type: tip.type, confirmButtonText: tip.confirmButtonText, cancelButtonText: '取消' })
+        .then(() => {
+          this.clearing = true
+          return clearLogByFilter(params)
+            .then(r => { this.clearDialog = false; this.afterCleared(r, f.taskId) })
+            .catch(() => {})
+            .finally(() => { this.clearing = false })
+        })
+        .catch(() => {})
+    },
+
+    /** 清理成功后的统一收尾: 提示条数 + 刷新日志弹窗与任务列表 */
+    afterCleared (r, taskId) {
+      const n = (r && r.data) || 0
+      this.$message.success(`已清理 ${n} 条日志`)
+      if (this.logDialog && (!taskId || this.taskLogId === taskId)) this.loadLogs()
+      this.refreshTasks()
     },
 
     onSortChange ({ prop, order }) {

@@ -119,10 +119,11 @@ public class SyncTaskController {
         return R.ok(taskService.logs(id, status, pageNum, pageSize));
     }
 
-    @ApiOperation("清空日志")
+    @ApiOperation("清理日志(不传 beforeDays 清理全部, 传 N 只清理 N 天前的)")
     @DeleteMapping("/{id}/logs")
-    public R<Void> clear(@PathVariable Long id) {
-        taskService.clearLog(id);
-        return R.ok();
+    public R<Integer> clear(@PathVariable Long id,
+                            @RequestParam(required = false) Integer beforeDays) {
+        int deleted = taskService.clearLog(id, beforeDays);
+        return R.ok(deleted, "已清理 " + deleted + " 条日志");
     }
 }

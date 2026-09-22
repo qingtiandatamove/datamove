@@ -56,6 +56,12 @@ export function resumeTask (id) { return request({ url: `/sync/task/${id}/resume
 export function stopTask (id) { return request({ url: `/sync/task/${id}/stop`, method: 'post' }) }
 export function resetTask (id) { return request({ url: `/sync/task/${id}/reset`, method: 'post' }) }
 export function taskProgress (id) { return request({ url: `/sync/task/${id}/progress`, method: 'get' }) }
+/* 清理某个任务的日志: 不传 beforeDays = 清全部; 传 N = 只清 N 天前的历史日志. 返回删除条数 */
+export function clearTaskLog (id, beforeDays) {
+  return request({ url: `/sync/task/${id}/logs`, method: 'delete', params: beforeDays ? { beforeDays } : {} })
+}
+/* 按筛选条件批量清理日志 (任务/状态/关键字/时间/保留天数); 无条件时需 force=true. 返回删除条数 */
+export function clearLogByFilter (params) { return request({ url: '/sync/log/clear', method: 'delete', params }) }
 /* 任务大盘: 进度 + 实时速率/ETA/当前批次/瓶颈库 */
 export function taskDashboard () { return request({ url: '/sync/task/dashboard', method: 'get' }) }
 
