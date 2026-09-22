@@ -16,6 +16,7 @@
 - 面向中小企业 / 外包团队 / 个人 Java 运维的可视化、零代码 MySQL 数据同步工具
 - 替代 DataX / Canal 复杂命令行配置
 - 支持 **断点续传 + 钉钉告警 + 幂等同步**
+- 自带 **数据校验(差异对账) + 一键修复**: 同步完能定位到「哪一行、哪个字段」对不上, 并一键补齐
 
 ## 二、技术栈
 
@@ -25,6 +26,8 @@
 | 前端 | Vue 2.7 + Element UI 2.13 (RuoYi-Vue) |
 | 持久层 | MyBatis-Plus 3.5 |
 | 同步 | 原生 JDBC 分批 + Canal Client 1.1.7 增量 |
+| 校验 | 源/目标双游标流式归并比对 (`setFetchSize` 流式读取, 内存里只驻留一行) |
+| 修复 | 按差异明细回放 INSERT(补缺失) / UPDATE(只改不一致的列), 不删目标库多余行 |
 | 加密 | AES 对称加密 (BC) |
 | 调度 | Spring `@Scheduled` + ThreadPool |
 | 告警 | 钉钉 Webhook |
@@ -43,6 +46,7 @@ flowchart LR
         TS[任务服务]
         FullEng[FullSyncEngine<br/>全量引擎]
         IncrEng[CanalSyncEngine<br/>增量引擎]
+        VerifyEng[DataVerifyEngine<br/>数据校验+一键修复]
         SQLEng[SQL 引擎]
         LogSvc[SyncLogService<br/>异步日志]
         Ding[钉钉告警]
@@ -57,19 +61,23 @@ flowchart LR
 
     UI -->|HTTP / Swagger| CTRL
     CTRL --> DS & TS & SQLEng
+    CTRL --> VerifyEng
     TS --> FullEng
     TS --> IncrEng
     FullEng -->|JDBC 分批| MySQL
     IncrEng <-->|TCP 11111| CanalSrv
     CanalSrv -->|订阅 ROW binlog| MySQL
+    VerifyEng -->|双游标归并比对 / 回放修复| MySQL
     FullEng --> LogSvc
     IncrEng --> LogSvc
+    VerifyEng --> LogSvc
     LogSvc --> MySQL
     FullEng & IncrEng --> Ding
     CTRL --> Redis
 ```
 
 前端只做展示与配置，同步动作全部落在后端引擎：全量走原生 JDBC 分批拉取，增量走 Canal Client 订阅 binlog，两者共用异步日志与钉钉告警。
+数据校验是同步之外的**旁路只读体检**：源库与目标库各开一个流式游标做双指针归并，结果与差异明细落在自己的两张表里，既不占用同步线程，也不改写任务状态。
 
 ## 四、目录结构
 
@@ -85,6 +93,7 @@ datamove/
 │   ├── engine/                   # 同步核心引擎
 │   │   ├── full/                 #   - 全量同步 (ID+Time 双模式+断点续传+幂等)
 │   │   ├── incr/                 #   - Canal 增量同步
+│   │   ├── verify/               #   - 数据校验(差异对账 + 一键修复)
 │   │   └── log/                  #   - 异步日志
 │   ├── log/                      # 日志 Controller(列表/统计/导出 CSV/清理)
 │   └── common/                   # 全局异常处理
@@ -180,7 +189,35 @@ datamove/
 - 数据源连接超时 / 失败
 - 行数不一致
 
-### 5.5 用户权限 - 对应文档 3.6
+### 5.5 数据校验与一键修复 - 对应文档 3.5
+- 入口:任务列表行内「数据校验」→ 抽屉。打开先展示**最近一次**结果(多数时候只是想看上次差异),要重跑再点「开始校验」
+- **对账算法**:源/目标各开一个流式游标(`setFetchSize(Integer.MIN_VALUE)`,内存里始终只驻留一行),
+  按主键升序**双指针归并**比对:
+  - 源主键 < 目标主键 → 源有目标无 = `MISSING`(缺失,补 INSERT)
+  - 源主键 > 目标主键 → 目标有源无 = `EXTRA`(目标脏数据,**只报告不删**)
+  - 两边主键相等 → 比字段值,不同 = `MISMATCH`(不一致,只更新不一致的列)
+  相比「两边各 `count(*)` 比总数」,归并能定位到具体哪一行、哪个字段,这才是"一键修复"的前提;
+  相比「分段 checksum」,它不用额外建索引、不用全表排序,且天然支持断点式进度上报
+- **进度可见**:已比对行数 / 源扫描行数 / 目标扫描行数与三类差异数每 5000 行回填一次,抽屉内 2s 轮询展示;
+  每 5 万行写一条同步日志,可随时「中止校验」
+- **差异明细**:按类型(缺失 / 不一致 / 多余)筛选 + 分页查看主键、字段差异与修复状态;
+  差异超过 2000 条时只保留前 2000 条明细(`truncated=1` 会明确提示"仅保留前 N 条"),**但统计数字始终是全量准确的**
+- **一键同步差异**:补缺失(INSERT 缺失行)+ 修不一致(只 UPDATE 差异列),每批 200 条落库并逐条回填
+  修复状态(已修复 / 失败 / 跳过),修复过程可「中止修复」
+  - **不会删除目标库任何数据**:多余行只在明细里标出来 —— 删除是破坏性动作,不藏在按钮背后
+- **忽略字段**(`sync_task.ignore_fields`):`update_time`、`ON UPDATE CURRENT_TIMESTAMP` 这类由数据库自动维护的列
+  天然与源库不同,不配忽略会刷出满屏假差异
+- **只读旁路**:校验与修复都**不改 `sync_task.status`**,避免出现「任务已完成却显示运行中」的状态错乱;
+  表结构(DDL)任务没有数据可比对,会直接提示,不会静默失败
+- **单实例保护**:同一任务同时只允许一个校验在跑
+- **接口**:`POST /sync/verify/start/{taskId}` 启动(只返回 `verifyId`,全表比对可能很慢,进度由前端轮询);
+  `GET /sync/verify/{verifyId}` 进度、`/{verifyId}/summary` 汇总、`/{verifyId}/diffs` 明细、
+  `GET /sync/verify/latest/{taskId}` 最近一次、`POST /{verifyId}/repair` 一键同步差异、
+  `POST /{verifyId}/stop` 中止校验、`POST /{verifyId}/repair/stop` 中止修复
+- 校验运行记录与差异明细都留痕(表 `sync_task_verify` / `sync_task_diff`),
+  任务名与源/目标库名都做了快照,任务改名后历史依然读得懂
+
+### 5.6 用户权限 - 对应文档 3.6
 - **超级管理员 (admin)**:所有权限
 - **普通操作员 (operator)**:仅查看任务、启停任务、查看日志
 - 超级管理员账号内置,启动时强制首次修改密码
@@ -194,6 +231,8 @@ datamove/
 | `sync_task_progress` | **断点进度核心表** |
 | `sync_task_log` | 同步日志 (含批次明细) |
 | `sync_task_run` | **运行历史核心表** (每次启动一条: 结果 / 耗时 / 行数 / 速率 / 异常) |
+| `sync_task_verify` | **数据校验运行记录** (每次校验一条: 进度 / 缺失·不一致·多余 统计 / 修复结果) |
+| `sync_task_diff` | 数据校验差异明细 (差异类型 / 主键 / 字段差异 / 修复状态), 「一键同步差异」的依据 |
 | `sync_canal_position` | Canal 增量监听位点 |
 | `sys_user / sys_role / sys_user_role / sys_menu / sys_role_menu` | RuoYi 框架权限 |
 
@@ -220,6 +259,7 @@ mysql -uroot -p datamove < sql/upgrade_20260921_sql_favorite.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_shard_count.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_shard_no.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_task_run.sql
+mysql -uroot -p datamove < sql/upgrade_20260922_data_verify.sql
 ```
 
 ### 3. 启动后端
@@ -275,7 +315,6 @@ SET GLOBAL binlog_format = 'ROW';
 
 - DDL 表结构同步
 - 数据脱敏
-- 数据差异对账校验
 - SaaS 多租户网页版
 - PostgreSQL / Oracle 支持
 
