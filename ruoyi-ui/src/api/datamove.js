@@ -66,6 +66,8 @@ export function clearFieldMapping (taskId) { return request({ url: `/sync/task/f
 
 /* ============ 日志 ============ */
 export function pageLog (params) { return request({ url: '/sync/log/page', method: 'get', params }) }
+/* 按当前筛选条件统计(条数/行数/耗时/异常数) */
+export function logSummary (params) { return request({ url: '/sync/log/summary', method: 'get', params }) }
 export function exportLogUrl (params) {
   const qs = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
   return (process.env.NODE_ENV === 'production' ? '' : '/dev-api') + '/sync/log/export?' + qs

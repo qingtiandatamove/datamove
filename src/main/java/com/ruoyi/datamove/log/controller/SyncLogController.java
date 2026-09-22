@@ -15,9 +15,11 @@ import javax.servlet.http.HttpServletResponse;
 import java.io.OutputStream;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.text.SimpleDateFormat;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -36,26 +38,79 @@ public class SyncLogController {
     public R<PageResult<SyncTaskLog>> page(@RequestParam(defaultValue = "1") int pageNum,
                                             @RequestParam(defaultValue = "10") int pageSize,
                                             @RequestParam(required = false) Long taskId,
+                                            @RequestParam(required = false) String taskName,
+                                            @RequestParam(required = false) String tableName,
                                             @RequestParam(required = false) String status,
-                                            @RequestParam(required = false) String tableName) {
-        Page<SyncTaskLog> page = new Page<>(pageNum, pageSize);
-        QueryWrapper<SyncTaskLog> wrapper = new QueryWrapper<>();
-        if (taskId != null) wrapper.eq("task_id", taskId);
-        if (status != null && !status.isEmpty()) wrapper.eq("status", status);
-        if (tableName != null && !tableName.isEmpty()) wrapper.like("table_name", tableName);
+                                            @RequestParam(required = false) Integer shardNo,
+                                            @RequestParam(required = false) Integer batchNo,
+                                            @RequestParam(required = false) String keyword,
+                                            @RequestParam(required = false) Boolean hasError,
+                                            @RequestParam(required = false) String beginTime,
+                                            @RequestParam(required = false) String endTime) {
+        QueryWrapper<SyncTaskLog> wrapper = buildWrapper(taskId, taskName, tableName, status,
+                shardNo, batchNo, keyword, hasError, beginTime, endTime);
         wrapper.orderByDesc("id");
+        Page<SyncTaskLog> page = new Page<>(pageNum, pageSize);
         Page<SyncTaskLog> result = logMapper.selectPage(page, wrapper);
         return R.ok(PageResult.of(result.getRecords(), result.getTotal()));
+    }
+
+    @ApiOperation("按当前筛选条件统计日志(条数/行数/耗时/异常数)")
+    @GetMapping("/summary")
+    public R<Map<String, Object>> summary(@RequestParam(required = false) Long taskId,
+                                          @RequestParam(required = false) String taskName,
+                                          @RequestParam(required = false) String tableName,
+                                          @RequestParam(required = false) String status,
+                                          @RequestParam(required = false) Integer shardNo,
+                                          @RequestParam(required = false) Integer batchNo,
+                                          @RequestParam(required = false) String keyword,
+                                          @RequestParam(required = false) Boolean hasError,
+                                          @RequestParam(required = false) String beginTime,
+                                          @RequestParam(required = false) String endTime) {
+        QueryWrapper<SyncTaskLog> w = buildWrapper(taskId, taskName, tableName, status,
+                shardNo, batchNo, keyword, hasError, beginTime, endTime);
+        w.select(
+                "COUNT(*) AS total",
+                "IFNULL(SUM(CASE WHEN status = 'SUCCESS' THEN 1 ELSE 0 END), 0) AS success_count",
+                "IFNULL(SUM(CASE WHEN status = 'FAILED'  THEN 1 ELSE 0 END), 0) AS failed_count",
+                "IFNULL(SUM(CASE WHEN status = 'RUNNING' THEN 1 ELSE 0 END), 0) AS running_count",
+                // 区间内实际同步行数(各批次之和)
+                "IFNULL(SUM(batch_rows), 0) AS rows_sum",
+                "IFNULL(ROUND(AVG(cost_ms)), 0) AS avg_cost_ms",
+                "IFNULL(MAX(cost_ms), 0) AS max_cost_ms",
+                "IFNULL(SUM(CASE WHEN error_msg IS NOT NULL AND error_msg <> '' THEN 1 ELSE 0 END), 0) AS error_count",
+                "MAX(create_time) AS last_time"
+        );
+        List<Map<String, Object>> list = logMapper.selectMaps(w);
+        Map<String, Object> src = list.isEmpty() ? null : list.get(0);
+        Map<String, Object> out = new HashMap<>(10);
+        out.put("total", val(src, "total"));
+        out.put("successCount", val(src, "success_count"));
+        out.put("failedCount", val(src, "failed_count"));
+        out.put("runningCount", val(src, "running_count"));
+        out.put("rowsSum", val(src, "rows_sum"));
+        out.put("avgCostMs", val(src, "avg_cost_ms"));
+        out.put("maxCostMs", val(src, "max_cost_ms"));
+        out.put("errorCount", val(src, "error_count"));
+        out.put("lastTime", src == null ? null : src.get("last_time"));
+        return R.ok(out);
     }
 
     @ApiOperation("导出日志(CSV)")
     @GetMapping("/export")
     public void export(@RequestParam(required = false) Long taskId,
+                       @RequestParam(required = false) String taskName,
+                       @RequestParam(required = false) String tableName,
                        @RequestParam(required = false) String status,
+                       @RequestParam(required = false) Integer shardNo,
+                       @RequestParam(required = false) Integer batchNo,
+                       @RequestParam(required = false) String keyword,
+                       @RequestParam(required = false) Boolean hasError,
+                       @RequestParam(required = false) String beginTime,
+                       @RequestParam(required = false) String endTime,
                        HttpServletResponse response) throws Exception {
-        QueryWrapper<SyncTaskLog> wrapper = new QueryWrapper<>();
-        if (taskId != null) wrapper.eq("task_id", taskId);
-        if (status != null && !status.isEmpty()) wrapper.eq("status", status);
+        QueryWrapper<SyncTaskLog> wrapper = buildWrapper(taskId, taskName, tableName, status,
+                shardNo, batchNo, keyword, hasError, beginTime, endTime);
         wrapper.orderByAsc("id");
         List<SyncTaskLog> list = logMapper.selectList(wrapper);
 
@@ -87,6 +142,76 @@ public class SyncLogController {
             os.write(sb.toString().getBytes(StandardCharsets.UTF_8));
             os.flush();
         }
+    }
+
+    /**
+     * 统一构造筛选条件 (分页 / 统计 / 导出 三处共用, 保证口径一致)
+     *
+     * @param keyword   全文关键字, 模糊匹配 任务名/表名/位点/同步内容/异常信息/同步模式
+     * @param hasError  仅看带异常信息的日志
+     * @param beginTime 起始时间, 支持 yyyy-MM-dd 或 yyyy-MM-dd HH:mm:ss
+     * @param endTime   结束时间(仅日期时补齐到当天 23:59:59)
+     */
+    private QueryWrapper<SyncTaskLog> buildWrapper(Long taskId, String taskName, String tableName,
+                                                   String status, Integer shardNo, Integer batchNo,
+                                                   String keyword, Boolean hasError,
+                                                   String beginTime, String endTime) {
+        QueryWrapper<SyncTaskLog> w = new QueryWrapper<>();
+        if (taskId != null) w.eq("task_id", taskId);
+        if (notBlank(taskName)) w.like("task_name", taskName.trim());
+        if (notBlank(tableName)) w.like("table_name", tableName.trim());
+        if (notBlank(status)) w.eq("status", status.trim());
+        if (shardNo != null) w.eq("shard_no", shardNo);
+        if (batchNo != null) w.eq("batch_no", batchNo);
+        if (Boolean.TRUE.equals(hasError)) {
+            w.isNotNull("error_msg");
+            w.ne("error_msg", "");
+        }
+        if (notBlank(keyword)) {
+            String kw = keyword.trim();
+            // 用 and(...) 包一层, 避免 or 条件把前面的 eq/like 冲掉
+            w.and(q -> q.like("task_name", kw)
+                    .or().like("table_name", kw)
+                    .or().like("batch_start_id", kw)
+                    .or().like("batch_end_id", kw)
+                    .or().like("content", kw)
+                    .or().like("error_msg", kw)
+                    .or().like("sync_mode", kw));
+        }
+        Date begin = parseTime(beginTime, false);
+        Date end = parseTime(endTime, true);
+        if (begin != null) w.ge("create_time", begin);
+        if (end != null) w.le("create_time", end);
+        return w;
+    }
+
+    /** 解析时间参数; endOfDay=true 且只给到日期时, 补齐到 23:59:59 */
+    private Date parseTime(String text, boolean endOfDay) {
+        if (!notBlank(text)) return null;
+        String s = text.trim().replace('T', ' ');
+        try {
+            if (s.length() <= 10) {
+                return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss")
+                        .parse(s + (endOfDay ? " 23:59:59" : " 00:00:00"));
+            }
+            if (s.length() == 16) {
+                return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(s + ":00");
+            }
+            return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss").parse(s);
+        } catch (Exception e) {
+            // 时间格式非法时忽略该条件, 不阻断查询
+            return null;
+        }
+    }
+
+    private static boolean notBlank(String s) {
+        return s != null && !s.trim().isEmpty();
+    }
+
+    private Object val(Map<String, Object> row, String key) {
+        if (row == null) return 0;
+        Object v = row.get(key);
+        return v == null ? 0 : v;
     }
 
     private String safe(String s) {
