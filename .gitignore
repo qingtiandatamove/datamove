@@ -62,4 +62,8 @@ src/main/resources/application-local.yml
 # IDE 历史
 .idea/workspace.xml
 .idea/tasks.xml
-.vscode/.browse.VC-db*ruoyi-ui/dist/
+.vscode/.browse.VC-db
+
+# ---------- 前端构建产物 ----------
+# npm run build 的输出, 不入仓(源码在 ruoyi-ui/src)
+ruoyi-ui/dist/
