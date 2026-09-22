@@ -1,0 +1,74 @@
+# ============================================================================
+# 数据同步平台 - MySQL 元数据库
+# ============================================================================
+#
+# 【背景】
+# 当前机器上的 datamove-mysql 容器是历史上手工 `docker run` 创建的, 它的
+# restart policy 原本是 `no` —— 容器一旦退出(异常退出 / docker daemon 重启)
+# 就不会自动恢复。症状很隐蔽: 后端 Spring 上下文照常启动、8080 照常监听,
+# 但 MyBatis 懒加载查库时才报 Connection refused, 看起来像应用故障。
+# 已用下面命令修正运行中的容器:
+#     docker update --restart unless-stopped datamove-mysql
+#
+# 【本文件的作用】
+# 把 mysql 纳入声明式编排(与 docker/canal/docker-compose.yml 对称),
+# 让 restart policy 在容器重建后依然有效。
+#
+# ⚠️ 重要: 不要直接 `docker compose up -d`
+# ----------------------------------------------------------------------------
+# 现有容器挂载的是【匿名卷】, 真实数据位于:
+#   /var/lib/docker/volumes/179ae824a19cf68660ccf8b3eb310cb1223f52d7c7d4a901f4693e35e332b93a/_data
+#
+# 而本文件声明的是【命名卷】datamove-mysql-data。直接 up 会新建一个空卷,
+# 导致「数据库空的、所有表和数据都不见了」。
+#
+# 若要在新容器中保留数据, 请先迁移(容器需短暂停机):
+#   1) 创建命名卷
+#        docker volume create datamove-mysql-data
+#   2) 停机后把匿名卷数据复制进命名卷
+#        docker stop datamove-mysql
+#        docker run --rm \
+#          -v 179ae824a19cf68660ccf8b3eb310cb1223f52d7c7d4a901f4693e35e332b93a:/from:ro \
+#          -v datamove-mysql-data:/to \
+#          alpine sh -c "cp -av /from/. /to/"
+#   3) 用 compose 重建
+#        docker rm -f datamove-mysql
+#        cd docker/mysql && docker compose up -d
+#   4) 验证数据在
+#        docker exec datamove-mysql mysql -uroot -p"$MYSQL_ROOT_PASSWORD" datamove -e "SHOW TABLES"
+# ----------------------------------------------------------------------------
+# ============================================================================
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: datamove-mysql
+    hostname: mysql
+    # 与 canal 保持一致的策略: 除非手动 stop, 否则 docker 重启后自动拉起
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    environment:
+      # 生产部署请用环境变量覆盖, 不要沿用这里的本地默认值
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-datamove}
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - datamove-mysql-data:/var/lib/mysql
+      # 仅当数据目录为空(全新库)时, 下面脚本才会被自动执行。
+      # 已存在数据的库不会重复执行, 升级脚本(upgrade_*.sql)仍需手动执行。
+      # - ../../sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-uroot", "-p${MYSQL_ROOT_PASSWORD:-root}", "--silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  # 显式命名, 避免 compose 自动加项目名前缀
+  datamove-mysql-data:
+    name: datamove-mysql-data
