@@ -257,6 +257,39 @@ public class CanalSyncEngine {
         }
 
         /**
+         * 解析「忽略字段」配置 (CSV, 列名按 remapColumns 之后的目标列名匹配)
+         *
+         * 适用场景: 源表有些列 (create_time, update_time, is_deleted 等) 不需要落到目标,
+         *           或者源/目标列名相同但业务上希望只读不写
+         *
+         * @return 列名集合 (永远保留 key 列, 否则 UPDATE/DELETE 找不到目标行);
+         *         空 = 不过滤 (与 DML 过滤 null 语义一致)
+         */
+        private Set<String> parseIgnoreFields(String csv) {
+            if (csv == null || csv.trim().isEmpty()) return null;
+            Set<String> s = new HashSet<>();
+            for (String t : csv.split(",")) {
+                t = t.trim();
+                if (!t.isEmpty()) s.add(t);
+            }
+            return s.isEmpty() ? null : s;
+        }
+
+        /**
+         * 按 ignoreFields 移除「非 key 列」。key 列永远保留 —— 否则 UPDATE/DELETE
+         * 无法用 key 定位目标行, 出现「删多/插多/错位」。
+         */
+        private List<CanalEntry.Column> filterIgnored(List<CanalEntry.Column> cols, Set<String> ignored) {
+            if (ignored == null || ignored.isEmpty()) return cols;
+            if (cols == null || cols.isEmpty()) return cols;
+            List<CanalEntry.Column> keep = new ArrayList<>(cols.size());
+            for (CanalEntry.Column c : cols) {
+                if (c.getIsKey() || !ignored.contains(c.getName())) keep.add(c);
+            }
+            return keep;
+        }
+
+        /**
          * 记录一行变更内容,供界面"同步内容"展示
          *  - INSERT/DELETE: 列出全部字段 (按映射后的目标名)
          *  - UPDATE: 先给主键,再只列出真正发生变化的字段
@@ -359,6 +392,10 @@ public class CanalSyncEngine {
                 Set<CanalEntry.EventType> dmlAllowed = parseDmlFilter(task.getBinlogDmlTypes());
                 log.info("[IncrSync] task[{}] dmlFilter={}", task.getTaskName(),
                         dmlAllowed == null ? "ALL" : dmlAllowed);
+                // 「忽略字段」过滤: 非 key 列不在 INSERT/UPDATE SQL 中写出 (key 列永远保留)
+                Set<String> ignoredFields = parseIgnoreFields(task.getIgnoreFields());
+                log.info("[IncrSync] task[{}] ignoreFields={}", task.getTaskName(),
+                        ignoredFields == null ? "[]" : ignoredFields);
                 TaskMetrics metrics = metricsRegistry.get(task.getId());
                 batchNo = 0;
                 while (running) {
@@ -562,6 +599,8 @@ public class CanalSyncEngine {
                                  List<CanalEntry.Column> rawCols) throws Exception {
             // 按字段映射重写列名 (不破坏数据, 仅改列名)
             List<CanalEntry.Column> cols = remapColumns(ctx, rawCols);
+            // 按 ignoreFields 过滤 (key 列不删)
+            cols = filterIgnored(cols, ignoredFields);
 
             StringBuilder sql = new StringBuilder("INSERT INTO `").append(table).append("` (");
             for (int i = 0; i < cols.size(); i++) sql.append("`").append(cols.get(i).getName()).append("`").append(i < cols.size() - 1 ? "," : "");
@@ -604,6 +643,8 @@ public class CanalSyncEngine {
                                  List<CanalEntry.Column> rawBefore) throws Exception {
             List<CanalEntry.Column> after = remapColumns(ctx, rawAfter);
             if (after == null || after.isEmpty()) return;
+            // 按 ignoreFields 过滤 (key 列不删; beforeKeys 已是 key 列, 单独来自 rawBefore, 不需过滤)
+            after = filterIgnored(after, ignoredFields);
 
             List<CanalEntry.Column> beforeKeys = CanalRowKeys.keyColumns(remapColumns(ctx, rawBefore));
             if (beforeKeys.isEmpty()) {
