@@ -4,7 +4,7 @@ spring:
     url: jdbc:mysql://127.0.0.1:3306/datamove?useUnicode=true&characterEncoding=utf8&zeroDateTimeBehavior=convertToNull&useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
     username: root
     # 数据库密码 (通过环境变量 DB_PASSWORD 注入真实值; 本地真实配置见 application-local.yml)
-    password: ${DB_PASSWORD:CHANGE_ME_DB_PASSWORD}
+    #password: ${DB_PASSWORD:CHANGE_ME_DB_PASSWORD}
 
 logging:
   level:

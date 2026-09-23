@@ -13,6 +13,7 @@
 --     upgrade_20260922_shard_no       sync_task_log.shard_no
 --     upgrade_20260922_task_run       sync_task_run 表
 --     upgrade_20260922_data_verify    sync_task.ignore_fields 列 + 数据校验两张表
+--     upgrade_20260923_audit_log      sync_audit_log 表
 --
 -- 【已有环境】请勿执行本脚本 —— 其中含 DROP TABLE 重建, 会清空业务数据;
 --   请按日期顺序执行 sql/upgrade_*.sql (那些脚本是幂等的)
@@ -397,9 +398,10 @@ VALUES
 (102, '同步任务', 100, 2, 'task', 'sync/task/index', '1', 'C', '0', '0', 'sync:task:list', 'build'),
 (103, '同步日志', 100, 3, 'log', 'sync/log/index', '1', 'C', '0', '0', 'sync:log:list', 'log'),
 (104, '授权管理', 100, 4, 'license', 'sync/license/index', '1', 'C', '0', '0', 'sync:license:list', 'valid-code'),
-(105, '用户管理', 0, 5, 'system/user', 'system/user/index', '1', 'C', '0', '0', 'system:user:list', 'user');
+(106, '审计日志', 100, 5, 'audit', 'sync/audit/index', '1', 'C', '0', '0', 'sync:audit:list', 'log'),
+(105, '用户管理', 0, 6, 'system/user', 'system/user/index', '1', 'C', '0', '0', 'system:user:list', 'user');
 
-INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 100), (1, 101), (1, 102), (1, 103), (1, 104), (1, 105),
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 100), (1, 101), (1, 102), (1, 103), (1, 104), (1, 105), (1, 106),
 (2, 100), (2, 101), (2, 102), (2, 103);
 
 -- 同步任务表的菜单按钮权限 (管理员独占)
@@ -449,5 +451,30 @@ CREATE TABLE `sync_canal_position` (
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_id` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Canal监听断点位';
+
+-- 4.7 审计日志表 (字段级变更追踪, 企业合规审计必备)
+-- 每次「新增/修改/删除」任务写一批行: 同一请求多个字段共享 revision_id
+DROP TABLE IF EXISTS `sync_audit_log`;
+CREATE TABLE `sync_audit_log` (
+  `id`            bigint(20)   NOT NULL AUTO_INCREMENT COMMENT '日志ID',
+  `revision_id`   bigint(20)   NOT NULL                COMMENT '请求内分组 (同一请求多个字段变更共享 revision_id)',
+  `entity_type`   varchar(32)  NOT NULL DEFAULT 'sync_task' COMMENT '实体类型 (当前仅 sync_task)',
+  `entity_id`     bigint(20)   NOT NULL                COMMENT '实体ID (task_id)',
+  `entity_name`   varchar(128) DEFAULT NULL            COMMENT '实体名称 (任务名称快照)',
+  `op_type`       varchar(16)  NOT NULL                COMMENT '操作类型 (CREATE/UPDATE/DELETE)',
+  `field_name`    varchar(64)  NOT NULL                COMMENT '字段名 (CREATE/DELETE 整体变更时为 *)',
+  `old_value`     text         DEFAULT NULL            COMMENT '旧值',
+  `new_value`     text         DEFAULT NULL            COMMENT '新值',
+  `operator_id`   bigint(20)   DEFAULT NULL            COMMENT '操作人ID (sys_user.user_id)',
+  `operator_name` varchar(64)  DEFAULT NULL            COMMENT '操作人 (快照, 任务改名后历史依然读得懂)',
+  `ip`            varchar(64)  DEFAULT NULL            COMMENT '客户端IP (兼容 nginx X-Forwarded-For)',
+  `user_agent`    varchar(255) DEFAULT NULL            COMMENT '客户端 UA',
+  `create_time`   datetime(3)  NOT NULL                COMMENT '创建时间 (毫秒精度)',
+  PRIMARY KEY (`id`),
+  KEY `idx_entity` (`entity_type`, `entity_id`, `create_time`) COMMENT '按实体查变更',
+  KEY `idx_operator` (`operator_id`, `create_time`)         COMMENT '按人查变更',
+  KEY `idx_revision` (`revision_id`)                        COMMENT '按请求分组查',
+  KEY `idx_create_time` (`create_time`)                     COMMENT '按时间范围查'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审计日志表 (字段级变更追踪, 合规审计)';
 
 SET FOREIGN_KEY_CHECKS = 1;

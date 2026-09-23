@@ -12,6 +12,7 @@
 | 断点续传 + 幂等 | 每批 `INSERT ... ON DUPLICATE KEY UPDATE` 成功才推进断点，重跑不脏数据 |
 | 分片并行提速 | FULL+ID 模式按主键区间拆多线程并行，**1000 万行从 ~31 分钟降到数分钟** |
 | 数据校验 + 一键修复 | 源/目标双游标流式归并，定位到行/字段差异，一键补 INSERT / 修 UPDATE（**不删目标库数据**） |
+| 字段级审计日志 | 谁/什么时候/改了哪个任务的哪个字段 (old → new)，同次请求多字段共享 revision_id，**企业合规审计必备** |
 | 实时监控大盘 | 任务运行中展示速率、ETA、瓶颈库、分片实时状态，3s 自动刷新 |
 | 运行历史留痕 | 每次启动一条记录，结果/耗时/行数/速率/异常，支持趋势图 + CSV 导出 |
 | 钉钉告警 | 同步失败 / Binlog 断开 / 数据源超时 / 行数不一致，自动推送 Webhook |
@@ -107,6 +108,7 @@ datamove/
 │   ├── auth/                     # 登录 & 用户认证
 │   ├── datasource/               # 数据源管理 (需求 3.1)
 │   ├── task/                     # 同步任务管理 (需求 3.2)
+│   ├── audit/                    # 审计日志 (字段级变更追踪, 需求 3.7)
 │   ├── engine/                   # 同步核心引擎
 │   │   ├── full/                 #   - 全量同步 (ID+Time 双模式+断点续传+幂等)
 │   │   ├── incr/                 #   - Canal 增量同步
@@ -239,6 +241,19 @@ datamove/
 - **普通操作员 (operator)**:仅查看任务、启停任务、查看日志
 - 超级管理员账号内置,启动时强制首次修改密码
 
+### 5.7 审计日志 - 对应文档 3.7
+- **谁在什么时候改了哪个任务的哪个字段**: 企业合规审计必备, 字段级粒度 (不是只记一条"任务被修改过")
+- **抓取点**: 仅 `sync_task` 的新增 / 修改 / 删除(软删); 启动 / 暂停 / 继续 / 终止 / 重置等运行时操作不进审计 (它们属于"行为", 在 `sync_task_run` 已有运行历史)
+- **同次请求分组**: 一次修改任务的多个字段共享一个 `revision_id`, 详情页一键还原"同一时刻发生了什么"
+- **字段快照**: `entity_name`(任务名) / `operator_name`(操作人) 都是**写库那一刻的快照**, 任务改名/操作员改名后历史依然读得懂
+- **上下文**: 同时记录 **IP** + **客户端 UA**, 方便定位"是哪个终端 / 谁登录之后改的"
+- **写入是旁路**: 审计日志写库失败只 warn, **绝不会**搞挂主流程 —— 审计是合规可选项, 不能反过来影响业务
+- **筛选**: 操作类型 / 关键字(任务名·字段名·操作人·旧值·新值·IP) / 时间范围; 按 id 或 create_time 排序
+- **UI**: 顶部「数据集成中心」→「审计日志」(admin 独占), 行底色按操作类型区分(新增淡绿 / 删除淡红), 旧值红色删除线、新值绿色高亮, 「查看整次」一键展开同 `revision_id` 的全部字段变更
+- **接口**: `GET /sync/audit/page` 分页 + `GET /sync/audit/revision/{revisionId}` 同次请求详情
+- **存储**: 表 `sync_audit_log`(升级脚本 `upgrade_20260923_audit_log.sql`)
+- **后续扩展**: `entity_type` 字段已预留, 未来要审计数据源 (`sync_datasource`) 修改时, 加一个 `recordDatasourceXxx(...)` 方法即可, 表结构不用动
+
 ## 六、数据库表结构 - 对应文档 4
 
 | 表 | 说明 |
@@ -250,6 +265,7 @@ datamove/
 | `sync_task_run` | **运行历史核心表** (每次启动一条: 结果 / 耗时 / 行数 / 速率 / 异常) |
 | `sync_task_verify` | **数据校验运行记录** (每次校验一条: 进度 / 缺失·不一致·多余 统计 / 修复结果) |
 | `sync_task_diff` | 数据校验差异明细 (差异类型 / 主键 / 字段差异 / 修复状态), 「一键同步差异」的依据 |
+| `sync_audit_log` | **审计日志核心表** (字段级变更: 谁/什么时候/改了哪个任务的哪个字段 old→new, 企业合规审计) |
 | `sync_canal_position` | Canal 增量监听位点 |
 | `sys_user / sys_role / sys_user_role / sys_menu / sys_role_menu` | RuoYi 框架权限 |
 
@@ -277,6 +293,7 @@ mysql -uroot -p datamove < sql/upgrade_20260922_shard_count.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_shard_no.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_task_run.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_data_verify.sql
+mysql -uroot -p datamove < sql/upgrade_20260923_audit_log.sql
 ```
 
 ### 3. 启动后端

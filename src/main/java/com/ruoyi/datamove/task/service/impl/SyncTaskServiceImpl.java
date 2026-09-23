@@ -3,6 +3,7 @@ package com.ruoyi.datamove.task.service.impl;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.ruoyi.common.core.domain.PageResult;
+import com.ruoyi.datamove.audit.service.AuditLogService;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.engine.consts.SyncType;
@@ -48,6 +49,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     private final CanalSyncEngine         canalSyncEngine;
     private final DdlSyncEngine           ddlSyncEngine;
     private final TaskMetricsRegistry     metricsRegistry;
+    private final AuditLogService         auditLogService;
 
     @Override
     public PageResult<SyncTask> page(String keyword, String taskType, String status,
@@ -105,6 +107,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         p.setCreateTime(new Date());
         p.setUpdateTime(new Date());
         progressMapper.insert(p);
+        // 审计: 字段级记录本次新增的全部字段快照 (谁、新增时间、字段 → 值)
+        auditLogService.recordTaskCreate(t);
         return t.getId();
     }
 
@@ -116,6 +120,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (SyncType.STATUS_RUNNING.equals(db.getStatus())) {
             throw new RuntimeException("运行中的任务不允许编辑,请先停止任务");
         }
+        // 审计: 拷贝一份修改前的快照, 待赋值完后与新值对比
+        SyncTask snapshot = copy(db);
         db.setTaskName(t.getTaskName());
         db.setTaskType(t.getTaskType());
         db.setSyncMode(t.getSyncMode());
@@ -137,6 +143,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setCanalPort(t.getCanalPort());
         db.setCanalDestination(t.getCanalDestination());
         db.setRemark(t.getRemark());
+        // 审计: 记录本次修改, 同一个请求的所有字段变更共享 revision_id
+        auditLogService.recordTaskUpdate(snapshot, db);
         taskMapper.updateById(db);
     }
 
@@ -156,6 +164,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         progressMapper.delete(new QueryWrapper<SyncTaskProgress>().eq("task_id", id));
         // 清理运行期实时指标
         metricsRegistry.remove(id);
+        // 审计: 软删也算「删除」, 记录被删那一刻的字段快照 (合规审计: 任务曾存在过、有过哪些字段配置)
+        auditLogService.recordTaskDelete(db);
     }
 
     @Override
@@ -458,5 +468,36 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (h > 0) sb.append(h).append("h");
         if (h > 0 || mi > 0) sb.append(mi).append("m");
         return sb.append(s).append("s").toString();
+    }
+
+    /**
+     * 深拷贝一份任务快照, 用于审计日志对比「修改前」状态
+     * 只复制会出现在审计日志白名单里的字段 —— 与 AuditLogService.buildDiffRows 完全对齐
+     */
+    private static SyncTask copy(SyncTask src) {
+        SyncTask c = new SyncTask();
+        c.setId(src.getId());
+        c.setTaskName(src.getTaskName());
+        c.setTaskType(src.getTaskType());
+        c.setSyncMode(src.getSyncMode());
+        c.setSourceId(src.getSourceId());
+        c.setTargetId(src.getTargetId());
+        c.setTableName(src.getTableName());
+        c.setIdField(src.getIdField());
+        c.setTimeField(src.getTimeField());
+        c.setStartId(src.getStartId());
+        c.setStartTime(src.getStartTime());
+        c.setBatchSize(src.getBatchSize());
+        c.setShardCount(src.getShardCount());
+        c.setIgnoreFields(src.getIgnoreFields());
+        c.setOverwriteFlag(src.getOverwriteFlag());
+        c.setDingtalkWebhook(src.getDingtalkWebhook());
+        c.setAlertEmail(src.getAlertEmail());
+        c.setCanalHost(src.getCanalHost());
+        c.setCanalPort(src.getCanalPort());
+        c.setCanalDestination(src.getCanalDestination());
+        c.setRemark(src.getRemark());
+        c.setStatus(src.getStatus());
+        return c;
     }
 }

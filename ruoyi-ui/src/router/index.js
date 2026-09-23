@@ -21,6 +21,7 @@ const routes = [
       { path: 'sync/dashboard',   component: () => import('@/views/sync/dashboard.vue'),  meta: { title: '任务大盘' } },
       { path: 'sync/log',         component: () => import('@/views/sync/log.vue'),        meta: { title: '同步日志' } },
       { path: 'sync/license',     component: () => import('@/views/sync/license.vue'),    meta: { title: '授权管理' } },
+      { path: 'sync/audit',       component: () => import('@/views/sync/audit.vue'),       meta: { title: '审计日志' } },
       { path: 'system/user',      component: () => import('@/views/system/user.vue'),     meta: { title: '用户管理' } },
       { path: 'profile',          component: () => import('@/views/profile.vue'),         meta: { title: '我的' } }
     ]

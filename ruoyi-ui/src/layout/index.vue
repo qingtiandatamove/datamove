@@ -25,6 +25,7 @@
           <el-menu-item index="/sync/dashboard"><i class="el-icon-odometer"></i><span>任务大盘</span></el-menu-item>
           <el-menu-item index="/sync/log"><i class="el-icon-document"></i><span>同步日志</span></el-menu-item>
           <el-menu-item index="/sync/license"><i class="el-icon-key"></i><span>授权管理</span></el-menu-item>
+        <el-menu-item index="/sync/audit"><i class="el-icon-view"></i><span>审计日志</span></el-menu-item>
         </el-submenu>
         <el-menu-item index="/system/user"><i class="el-icon-user"></i><span>用户管理</span></el-menu-item>
       </el-menu>

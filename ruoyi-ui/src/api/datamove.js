@@ -109,9 +109,15 @@ export function logTrend (days) { return request({ url: '/sync/log/trend', metho
 
 /* ============ License ============ */
 /* customError: 授权模块是 opt-in 的, 未启用时后端路由不存在 (404),
-   由 license.vue 自行降级为「模块未启用」占位, 不走全局错误弹窗 */
+  由 license.vue 自行降级为「模块未启用」占位, 不走全局错误弹窗 */
 export function getLicense () { return request({ url: '/sync/license', method: 'get', customError: true }) }
 export function updateLicense (data) { return request({ url: '/sync/license', method: 'put', data, customError: true }) }
+
+/* ============ 审计日志 (字段级变更追踪, 合规审计) ============ */
+/* 筛选: keyword(任务名/字段名/操作人/旧值/新值/IP) / opType / 时间范围 */
+export function pageAudit (params) { return request({ url: '/sync/audit/page', method: 'get', params }) }
+/* 同一次请求的所有字段变更 (按 revision_id), 详情弹窗用 */
+export function auditRevision (revisionId) { return request({ url: `/sync/audit/revision/${revisionId}`, method: 'get' }) }
 
 /* ============ 用户管理 ============ */
 export function pageUser (params) { return request({ url: '/system/user/page', method: 'get', params }) }
