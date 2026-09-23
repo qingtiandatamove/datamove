@@ -95,6 +95,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         Long exists = taskMapper.selectCount(
                 new QueryWrapper<SyncTask>().eq("task_name", t.getTaskName()).eq("del_flag", "0"));
         if (exists > 0) throw new RuntimeException("任务名称已存在: " + t.getTaskName());
+        // binlog DML 类型过滤: 归一化为大写逗号串 (非法 token 丢弃, 全非法 = null 不过滤)
+        t.setBinlogDmlTypes(normalizeBinlogDmlTypes(t.getBinlogDmlTypes()));
         t.setStatus(SyncType.STATUS_STOP);
         taskMapper.insert(t);
         // 初始化进度
@@ -142,6 +144,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setCanalHost(t.getCanalHost());
         db.setCanalPort(t.getCanalPort());
         db.setCanalDestination(t.getCanalDestination());
+        // binlog DML 类型过滤: 归一化为大写逗号串 (非法 token 丢弃, 全非法 = null 不过滤)
+        db.setBinlogDmlTypes(normalizeBinlogDmlTypes(t.getBinlogDmlTypes()));
         db.setRemark(t.getRemark());
         // 审计: 记录本次修改, 同一个请求的所有字段变更共享 revision_id
         auditLogService.recordTaskUpdate(snapshot, db);
@@ -496,8 +500,26 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         c.setCanalHost(src.getCanalHost());
         c.setCanalPort(src.getCanalPort());
         c.setCanalDestination(src.getCanalDestination());
+        c.setBinlogDmlTypes(src.getBinlogDmlTypes());
         c.setRemark(src.getRemark());
         c.setStatus(src.getStatus());
         return c;
+    }
+
+    /**
+     * binlog DML 类型过滤配置归一化:
+     *  - "insert, update" → "INSERT,UPDATE"
+     *  - 非法 token 直接丢弃; 全部非法或为空 → null (不过滤, 三种 DML 全同步)
+     */
+    private static String normalizeBinlogDmlTypes(String config) {
+        if (config == null || config.trim().isEmpty()) return null;
+        java.util.List<String> keep = new java.util.ArrayList<>();
+        for (String t : config.toUpperCase().split(",")) {
+            String token = t.trim();
+            if ("INSERT".equals(token) || "UPDATE".equals(token) || "DELETE".equals(token)) {
+                keep.add(token);
+            }
+        }
+        return keep.isEmpty() ? null : String.join(",", keep);
     }
 }

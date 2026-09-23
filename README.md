@@ -9,6 +9,7 @@
 | 零侵入增量同步 | 基于 Canal 订阅源库 binlog ROW 模式，**不写源库、不加触发器** |
 | 可视化零代码 | 页面点点选选即可跑任务，替代 DataX / Canal 的命令行与 JSON |
 | 全量 + 增量双模式 | 全量按主键 ID / 时间字段分批拉取，增量用 binlog 实时订阅 |
+| binlog 事件过滤 | 服务端订阅收紧为「源库.任务表」，无关库表事件不进客户端；DML 类型按需勾选（如归档库只收 INSERT），**避免无关事件污染下游** |
 | 断点续传 + 幂等 | 每批 `INSERT ... ON DUPLICATE KEY UPDATE` 成功才推进断点，重跑不脏数据 |
 | 分片并行提速 | FULL+ID 模式按主键区间拆多线程并行，**1000 万行从 ~31 分钟降到数分钟** |
 | 数据校验 + 一键修复 | 源/目标双游标流式归并，定位到行/字段差异，一键补 INSERT / 修 UPDATE（**不删目标库数据**） |
@@ -165,6 +166,14 @@ datamove/
 - **分片并行同步**(大数据提速):FULL+ID 模式配置 `shard_count > 1` 时按 `MIN/MAX(主键)` 均分区间,
   每分片独立线程与连接并行读写, 吞吐近线性提升(1000 万行从约 31 分钟缩到数分钟);
   断点续传任务自动回退单线程, 暂停后重跑幂等无脏数据
+- **binlog 事件过滤**(增量任务):按 **库/表/DML 类型** 三层过滤增量事件, 避免无关事件污染下游——
+  - **库/表过滤**(自动, 零配置):Canal 服务端订阅表达式从 `.*\..*` 收紧为「源库.任务表」,
+    其他库表的事件**根本不进客户端**, 减少网络传输与解析开销
+    (源库缺失时自动退化为全量订阅老行为, 客户端仍有兜底过滤)
+  - **DML 类型过滤**(可选, 任务表单勾选):只同步勾选的 INSERT / UPDATE / DELETE,
+    未勾选的事件直接丢弃不写目标库——典型场景: 归档库只同步 INSERT、
+    审计库不要 DELETE; 不勾 = 全部(老任务零感知)
+  - 批次日志可见 `filtered` 计数, 被过滤丢弃的事件数量一目了然
 
 #### 批次 (batch_size) 与分片 (shard_count) 的区别
 
@@ -260,7 +269,7 @@ datamove/
 | 表 | 说明 |
 |----|------|
 | `sync_datasource` | 数据源配置 (密码 AES 加密) |
-| `sync_task` | 同步任务主表 |
+| `sync_task` | 同步任务主表 (含 `binlog_dml_types` 增量 DML 过滤配置) |
 | `sync_task_progress` | **断点进度核心表** |
 | `sync_task_log` | 同步日志 (含批次明细) |
 | `sync_task_run` | **运行历史核心表** (每次启动一条: 结果 / 耗时 / 行数 / 速率 / 异常) |
@@ -295,6 +304,7 @@ mysql -uroot -p datamove < sql/upgrade_20260922_shard_no.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_task_run.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_data_verify.sql
 mysql -uroot -p datamove < sql/upgrade_20260923_audit_log.sql
+mysql -uroot -p datamove < sql/upgrade_20260923_binlog_filter.sql
 ```
 
 ### 3. 启动后端

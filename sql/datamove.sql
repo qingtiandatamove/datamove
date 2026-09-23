@@ -14,6 +14,7 @@
 --     upgrade_20260922_task_run       sync_task_run 表
 --     upgrade_20260922_data_verify    sync_task.ignore_fields 列 + 数据校验两张表
 --     upgrade_20260923_audit_log      sync_audit_log 表
+--     upgrade_20260923_binlog_filter  sync_task.binlog_dml_types 列
 --
 -- 【已有环境】请勿执行本脚本 —— 其中含 DROP TABLE 重建, 会清空业务数据;
 --   请按日期顺序执行 sql/upgrade_*.sql (那些脚本是幂等的)
@@ -149,6 +150,7 @@ CREATE TABLE `sync_task` (
   `canal_host`      varchar(100)  DEFAULT NULL COMMENT 'Canal服务器地址(INCR模式)',
   `canal_port`      int(11)       DEFAULT 11111 COMMENT 'Canal端口(INCR模式)',
   `canal_destination` varchar(100) DEFAULT NULL COMMENT 'Canal destination',
+  `binlog_dml_types` varchar(50)  DEFAULT NULL COMMENT 'binlog DML类型过滤(逗号分隔 INSERT/UPDATE/DELETE 子集, 空=全部同步)',
   `remark`          varchar(500)  DEFAULT NULL COMMENT '备注',
   `del_flag`        char(1)       NOT NULL DEFAULT '0' COMMENT '删除标志',
   `create_by`       varchar(64)   DEFAULT '' COMMENT '创建者',

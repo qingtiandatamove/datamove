@@ -190,6 +190,17 @@
               <el-form-item label="Canal Host"><el-input v-model="form.canalHost" /></el-form-item>
               <el-form-item label="Canal Port"><el-input-number v-model="form.canalPort" :min="1" :max="65535" /></el-form-item>
               <el-form-item label="Destination"><el-input v-model="form.canalDestination" /></el-form-item>
+              <el-form-item label="DML 过滤">
+                <el-checkbox-group v-model="dmlTypes">
+                  <el-checkbox label="INSERT">新增</el-checkbox>
+                  <el-checkbox label="UPDATE">更新</el-checkbox>
+                  <el-checkbox label="DELETE">删除</el-checkbox>
+                </el-checkbox-group>
+                <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                  只同步勾选的 binlog 事件类型, 未勾选的直接丢弃 (不写目标库)。<br/>
+                  订阅范围已自动收紧为「源库.任务表」, 其他库表事件不会进入本任务。
+                </div>
+              </el-form-item>
             </template>
 
             <template v-else>
@@ -464,6 +475,8 @@ export default {
       page: { rows: [], total: 0 },
       loading: false, dialog: false, saving: false,
       form: { taskType: 'FULL', syncMode: 'ID', batchSize: 1000, ignoreFields: '' },
+      // binlog DML 类型过滤 (勾选数组, 提交时拼成逗号串 binlogDmlTypes; 空 = 全部同步)
+      dmlTypes: ['INSERT', 'UPDATE', 'DELETE'],
       rules: {
         taskName: [{ required: true, message: '必填' }],
         taskType: [{ required: true }],
@@ -750,10 +763,14 @@ export default {
       const base = { taskType: type, syncMode: type === 'FULL' ? 'ID' : (type === 'DDL' ? 'DDL' : 'BINLOG'), idField: 'id', timeField: 'update_time', overwriteFlag: 0, shardCount: 1 }
       if (type !== 'DDL') base.batchSize = 1000
       this.dialog = true; this.form = base; this.tabActive = 'base'
+      this.dmlTypes = ['INSERT', 'UPDATE', 'DELETE']
       this.mappings = []; this.sourceFields = []; this.targetFields = []; this.originalMappings = []
     },
     onEdit (row) {
       this.dialog = true; this.form = Object.assign({}, row); this.tabActive = 'base'
+      // binlog DML 过滤: 库里存逗号串, 界面用勾选数组 (空 = 全部, 与后端语义一致)
+      const cfg = row.binlogDmlTypes
+      this.dmlTypes = cfg ? cfg.split(',').map(s => s.trim().toUpperCase()).filter(s => ['INSERT', 'UPDATE', 'DELETE'].includes(s)) : ['INSERT', 'UPDATE', 'DELETE']
       this.mappings = []; this.sourceFields = []; this.targetFields = []; this.originalMappings = []
       // 拉一次字段 (异步; tab 切到 mapping 时也再拉一次)
       this.fetchColumns()
@@ -798,6 +815,14 @@ export default {
         if (!ok) { this.tabActive = 'base'; return }
         // DDL 类型不需要 batchSize, 若没填则用 100 占位 (后端不依赖该值)
         if (this.form.taskType === 'DDL' && !this.form.batchSize) this.form.batchSize = 100
+        // binlog DML 过滤: 勾选数组拼成逗号串 (全勾/全不勾 = null, 即不过滤)
+        if (this.form.taskType === 'INCR') {
+          const all = ['INSERT', 'UPDATE', 'DELETE']
+          const picked = (this.dmlTypes || []).filter(t => all.includes(t))
+          this.form.binlogDmlTypes = (picked.length === 0 || picked.length === all.length) ? null : picked.join(',')
+        } else {
+          this.form.binlogDmlTypes = null
+        }
         this.saving = true
         const api = this.form.id ? updateTask : addTask
         api(this.form).then(r => {

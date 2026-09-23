@@ -221,6 +221,42 @@ public class CanalSyncEngine {
         }
 
         /**
+         * 服务端订阅过滤表达式: 只订阅「源库.任务表」
+         *  - canal filter 是逗号分隔的正则, 库名/表名里的正则元字符要先转义
+         *  - 源库或表名缺失时退化为 ".*\\..*" (老行为), 客户端仍有兜底过滤
+         */
+        private String buildSubscribeFilter() {
+            String db = src.getDbName();
+            String table = task.getTableName();
+            if (db == null || db.trim().isEmpty() || table == null || table.trim().isEmpty()) {
+                return ".*\\..*";
+            }
+            return escapeRegex(db.trim()) + "\\." + escapeRegex(table.trim());
+        }
+
+        /** 正则元字符转义 (canal filter 表达式按正则解析) */
+        private String escapeRegex(String s) {
+            return s.replaceAll("([^\\w])", "\\\\$1");
+        }
+
+        /**
+         * DML 类型过滤: 解析任务配置 "INSERT,UPDATE,DELETE" 的子集
+         *  - 空/null/非法值 → 返回 null, 表示不过滤 (三种全部同步, 老任务零感知)
+         *  - 非法 token 直接忽略, 全部非法时同样退化为 null
+         */
+        private Set<CanalEntry.EventType> parseDmlFilter(String config) {
+            if (config == null || config.trim().isEmpty()) return null;
+            Set<CanalEntry.EventType> allowed = EnumSet.noneOf(CanalEntry.EventType.class);
+            for (String t : config.toUpperCase().split(",")) {
+                String token = t.trim();
+                if ("INSERT".equals(token)) allowed.add(CanalEntry.EventType.INSERT);
+                else if ("UPDATE".equals(token)) allowed.add(CanalEntry.EventType.UPDATE);
+                else if ("DELETE".equals(token)) allowed.add(CanalEntry.EventType.DELETE);
+            }
+            return allowed.isEmpty() ? null : allowed;
+        }
+
+        /**
          * 记录一行变更内容,供界面"同步内容"展示
          *  - INSERT/DELETE: 列出全部字段 (按映射后的目标名)
          *  - UPDATE: 先给主键,再只列出真正发生变化的字段
@@ -303,8 +339,9 @@ public class CanalSyncEngine {
             String dest      = task.getCanalDestination();
             try {
                 connector.connect();
-                // 订阅目标表的所有 DML
-                connector.subscribe(".*\\..*");
+                // 订阅过滤: 服务端只订阅「源库.任务表」, 无关库/表的事件根本不进客户端, 减少网络与解析开销
+                // 源库缺失时退化为全量订阅 .*\\..* (老行为), 客户端仍有一层库/表兜底过滤
+                connector.subscribe(buildSubscribeFilter());
                 connector.rollback();
 
                 // 回放到上次 position
@@ -318,6 +355,10 @@ public class CanalSyncEngine {
                 SyncContext ctx = buildCtx(task, src, tgt);
                 ctx.setRunId(runId);
                 log.info("[IncrSync] task[{}] mappingEnabled={}", task.getTaskName(), ctx.isMappingEnabled());
+                // DML 类型过滤 (INSERT/UPDATE/DELETE 子集, 空 = 全部)
+                Set<CanalEntry.EventType> dmlAllowed = parseDmlFilter(task.getBinlogDmlTypes());
+                log.info("[IncrSync] task[{}] dmlFilter={}", task.getTaskName(),
+                        dmlAllowed == null ? "ALL" : dmlAllowed);
                 TaskMetrics metrics = metricsRegistry.get(task.getId());
                 batchNo = 0;
                 while (running) {
@@ -341,7 +382,7 @@ public class CanalSyncEngine {
                     String startMarker = mark(firstEntry);
                     String endMarker   = mark(lastEntry);
 
-                    int inserts = 0, updates = 0, deletes = 0, errs = 0;
+                    int inserts = 0, updates = 0, deletes = 0, errs = 0, filtered = 0;
                     String firstErr = null;
                     StringBuilder contentSb = new StringBuilder();
                     long applyStartMs = System.currentTimeMillis();
@@ -366,6 +407,11 @@ public class CanalSyncEngine {
                                     && schema != null && !schema.isEmpty()
                                     && !schema.equalsIgnoreCase(src.getDbName())) continue;
                             if (!table.equalsIgnoreCase(tableName)) continue;
+                            // DML 类型过滤: 任务只勾了部分类型时, 其余事件直接丢弃, 不污染下游
+                            if (!dmlAllowed.contains(type)) {
+                                filtered++;
+                                continue;
+                            }
 
                             for (CanalEntry.RowData rd : rowChange.getRowDatasList()) {
                                 try {
@@ -437,8 +483,8 @@ public class CanalSyncEngine {
                                 // 运行历史心跳(最多 5s 一次落库)
                                 runService.heartbeat(ctx.getRunId(), progress, batchNo);
                             }
-                            log.info("[IncrSync] task[{}] inserts={}, updates={}, deletes={}, errs={}",
-                                    task.getTaskName(), inserts, updates, deletes, errs);
+                            log.info("[IncrSync] task[{}] inserts={}, updates={}, deletes={}, errs={}, filtered={}",
+                                    task.getTaskName(), inserts, updates, deletes, errs, filtered);
                             // 批次日志异步落库, 界面"同步日志"可见
                             logService.writeLog(ctx, batchNo, startMarker, endMarker,
                                     inserts + updates + deletes,

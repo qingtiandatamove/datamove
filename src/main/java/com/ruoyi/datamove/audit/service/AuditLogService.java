@@ -148,6 +148,7 @@ public class AuditLogService {
         addIfChanged(rows, revisionId, snapshot, opType, "canalHost",       before, after, SyncTask::getCanalHost);
         addIfChanged(rows, revisionId, snapshot, opType, "canalPort",       before, after, SyncTask::getCanalPort);
         addIfChanged(rows, revisionId, snapshot, opType, "canalDestination",before, after, SyncTask::getCanalDestination);
+        addIfChanged(rows, revisionId, snapshot, opType, "binlogDmlTypes",  before, after, SyncTask::getBinlogDmlTypes);
         addIfChanged(rows, revisionId, snapshot, opType, "remark",          before, after, SyncTask::getRemark);
 
         // CREATE 还要单独记下 status (add() 强制写成 STOP); DELETE 不打, 反正删了状态没意义

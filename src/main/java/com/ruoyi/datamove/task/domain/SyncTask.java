@@ -76,5 +76,8 @@ public class SyncTask extends BaseEntity implements Serializable {
     private Integer canalPort;
     private String canalDestination;
 
+    /** binlog DML 类型过滤: 逗号分隔 INSERT/UPDATE/DELETE 子集; 为空 = 全部同步 */
+    private String binlogDmlTypes;
+
     private String delFlag;
 }
