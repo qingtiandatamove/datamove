@@ -173,7 +173,6 @@ datamove/
   - **DML 类型过滤**(可选, 任务表单勾选):只同步勾选的 INSERT / UPDATE / DELETE,
     未勾选的事件直接丢弃不写目标库——典型场景: 归档库只同步 INSERT、
     审计库不要 DELETE; 不勾 = 全部(老任务零感知)
-  - 批次日志可见 `filtered` 计数, 被过滤丢弃的事件数量一目了然
 - **binlog 忽略字段**(增量 + 全量任务):任务表单「校验忽略字段」一栏填列名,
   binlog 解析的 INSERT/UPDATE SQL 在拼装时**自动剔除**这些列, 目标库保持原值不变——
   - 典型场景: 目标库自带 `create_time` / `update_by` / `tenant_id` 等列, 不能被源库覆盖;
