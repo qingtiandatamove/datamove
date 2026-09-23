@@ -89,9 +89,11 @@
                 @click="onStop(s.row)">停止</el-button>
               <!-- 数据校验: 比对源库与目标库, 展示差异并可一键同步缺失数据 -->
               <el-button size="mini" type="primary" plain @click="onOpenVerify(s.row)">数据校验</el-button>
+              <!-- 编辑任务: 直接放在操作列, 不再藏进下拉 -->
+              <el-button size="mini" type="primary" plain icon="el-icon-edit" @click="onEdit(s.row)">编辑任务</el-button>
             </template>
 
-            <!-- 低频/危险动作收进下拉: 重置进度 / 日志 / 清日志 / 编辑 / 删除 -->
+            <!-- 低频/危险动作收进下拉: 重置进度 / 日志 / 清日志 / 删除 -->
             <el-dropdown trigger="click" @command="onRowCommand($event, s.row)">
               <el-button size="mini" class="op-more">
                 更多<i class="el-icon-arrow-down el-icon--right"></i>
@@ -101,7 +103,6 @@
                   icon="el-icon-refresh-left" :disabled="s.row.status === 'RUNNING'">重置进度</el-dropdown-item>
                 <el-dropdown-item command="log" icon="el-icon-tickets">查看日志</el-dropdown-item>
                 <el-dropdown-item command="clearLog" icon="el-icon-delete-solid">清理日志</el-dropdown-item>
-                <el-dropdown-item command="edit" icon="el-icon-edit" divided>编辑任务</el-dropdown-item>
                 <el-dropdown-item command="del" icon="el-icon-delete" divided>
                   <span class="op-danger">删除任务</span>
                 </el-dropdown-item>
