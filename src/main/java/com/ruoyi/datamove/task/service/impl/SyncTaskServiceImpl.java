@@ -176,6 +176,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     public void start(Long id) {
         SyncTask db = taskMapper.selectById(id);
         if (db == null) throw new RuntimeException("任务不存在");
+        String oldStatus = db.getStatus();
         if (SyncType.TASK_FULL.equalsIgnoreCase(db.getTaskType())) {
             fullSyncEngine.start(id);
         } else if (SyncType.TASK_INCR.equalsIgnoreCase(db.getTaskType())) {
@@ -185,6 +186,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         } else {
             throw new RuntimeException("不支持的任务类型: " + db.getTaskType());
         }
+        // 引擎已成功接管 —— 记一条 START 审计 (审计写入兜底 warn, 不会影响主流程)
+        auditLogService.recordTaskAction(db, "START", oldStatus, SyncType.STATUS_RUNNING);
     }
 
     @Override
@@ -194,7 +197,9 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (!SyncType.TASK_FULL.equalsIgnoreCase(db.getTaskType())) {
             throw new RuntimeException("仅全量任务支持暂停");
         }
+        String oldStatus = db.getStatus();
         fullSyncEngine.pause(id);
+        auditLogService.recordTaskAction(db, "PAUSE", oldStatus, SyncType.STATUS_PAUSE);
     }
 
     @Override
@@ -204,19 +209,23 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (!SyncType.TASK_FULL.equalsIgnoreCase(db.getTaskType())) {
             throw new RuntimeException("仅全量任务支持继续");
         }
+        String oldStatus = db.getStatus();
         fullSyncEngine.resume(id);
+        auditLogService.recordTaskAction(db, "RESUME", oldStatus, SyncType.STATUS_RUNNING);
     }
 
     @Override
     public void stop(Long id) {
         SyncTask db = taskMapper.selectById(id);
         if (db == null) throw new RuntimeException("任务不存在");
+        String oldStatus = db.getStatus();
         if (SyncType.TASK_FULL.equalsIgnoreCase(db.getTaskType())) {
             fullSyncEngine.stop(id);
         } else if (SyncType.TASK_INCR.equalsIgnoreCase(db.getTaskType())) {
             canalSyncEngine.stop(id);
         }
-        // DDL 同步是单次秒级操作, 不需要 stop
+        // DDL 同步是单次秒级操作, 不需要 stop —— 也不记审计)
+        auditLogService.recordTaskAction(db, "STOP", oldStatus, SyncType.STATUS_STOP);
     }
 
     @Override
@@ -510,16 +519,18 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
      * binlog DML 类型过滤配置归一化:
      *  - "insert, update" → "INSERT,UPDATE"
      *  - 非法 token 直接丢弃; 全部非法或为空 → null (不过滤, 三种 DML 全同步)
+     *  - 三种全勾 (等价于不过滤) 也收敛为 null, 与前端「全勾 = 不过滤」语义一致
      */
     private static String normalizeBinlogDmlTypes(String config) {
         if (config == null || config.trim().isEmpty()) return null;
-        java.util.List<String> keep = new java.util.ArrayList<>();
+        java.util.LinkedHashSet<String> keep = new java.util.LinkedHashSet<>();
         for (String t : config.toUpperCase().split(",")) {
             String token = t.trim();
             if ("INSERT".equals(token) || "UPDATE".equals(token) || "DELETE".equals(token)) {
                 keep.add(token);
             }
         }
-        return keep.isEmpty() ? null : String.join(",", keep);
+        if (keep.isEmpty() || keep.size() == 3) return null;
+        return String.join(",", keep);
     }
 }

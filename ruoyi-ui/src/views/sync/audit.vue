@@ -12,6 +12,10 @@
           <el-option label="新增" value="CREATE" />
           <el-option label="修改" value="UPDATE" />
           <el-option label="删除" value="DELETE" />
+          <el-option label="启动" value="START" />
+          <el-option label="暂停" value="PAUSE" />
+          <el-option label="继续" value="RESUME" />
+          <el-option label="停止" value="STOP" />
         </el-select>
       </el-form-item>
       <el-form-item>
@@ -187,12 +191,20 @@ export default {
       if (t === 'CREATE') return 'success'
       if (t === 'DELETE') return 'danger'
       if (t === 'UPDATE') return 'warning'
+      if (t === 'START') return 'success'
+      if (t === 'STOP')  return 'info'
+      if (t === 'PAUSE') return 'warning'
+      if (t === 'RESUME') return 'success'
       return 'info'
     },
     opTypeLabel (t) {
       if (t === 'CREATE') return '新增'
       if (t === 'DELETE') return '删除'
       if (t === 'UPDATE') return '修改'
+      if (t === 'START') return '启动'
+      if (t === 'STOP')  return '停止'
+      if (t === 'PAUSE') return '暂停'
+      if (t === 'RESUME') return '继续'
       return t || '-'
     },
     /* 行底色: 删除偏红, 新增偏绿 */

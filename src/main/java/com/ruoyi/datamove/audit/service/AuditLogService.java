@@ -19,6 +19,7 @@ import org.springframework.web.context.request.ServletRequestAttributes;
 import javax.servlet.http.HttpServletRequest;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicLong;
@@ -27,12 +28,13 @@ import java.util.concurrent.atomic.AtomicLong;
  * 审计日志服务 (字段级变更追踪)
  *
  * 写入:
- *   - recordTaskCreate(task)  任务新增时调用
- *   - recordTaskUpdate(before, after)  任务修改时调用 (只写真正变化的字段, 同次请求共享 revision_id)
- *   - recordTaskDelete(task)  任务删除(软删)时调用
+ *   - recordTaskCreate(task)                 任务新增时调用
+ *   - recordTaskUpdate(before, after)        任务修改时调用 (只写真正变化的字段, 同次请求共享 revision_id)
+ *   - recordTaskDelete(task)                 任务删除(软删)时调用
+ *   - recordTaskAction(task, action, ...)    任务「启动/暂停/继续/停止」动作时调用 (单行, 不是字段级 diff)
  *
  * 查询:
- *   - page(...)               分页列表 (供前端审计日志页用)
+ *   - page(...)                               分页列表 (供前端审计日志页用)
  *
  * 异常兜底: 审计日志写入失败绝不抛出去, 只 warn 一下 —— 审计日志是合规可选项, 不能让它搞挂主流程
  *
@@ -75,6 +77,38 @@ public class AuditLogService {
         List<AuditLog> rows = buildDiffRows(rev, task, null, "DELETE");
         if (rows.isEmpty()) return;
         safeInsertBatch(rows, "DELETE", task.getId());
+    }
+
+    /**
+     * 任务「启动 / 暂停 / 继续 / 停止」动作审计
+     *
+     * 与 recordTaskCreate/Update/Delete 不同 —— 这里是「任务生命周期」事件, 不是字段级 diff,
+     * 因此不走 buildDiffRows, 直接构造一条单行审计记录:
+     *   - revision_id 唯一 (一次动作一行)
+     *   - op_type      START / PAUSE / RESUME / STOP
+     *   - field_name   "status"  —— 复用字段列展示「动作前状态 → 动作后状态」
+     *   - old_value    动作前的 status
+     *   - new_value    动作意图的新 status (start=RUNNING / pause=PAUSE / resume=RUNNING / stop=STOP)
+     *
+     * 调用方应保证在引擎方法成功之后再调本方法 —— 如果引擎抛异常, 这次动作就没发生, 不应记审计
+     */
+    public void recordTaskAction(SyncTask task, String action, String oldStatus, String newStatus) {
+        if (task == null) return;
+        if (!"START".equals(action) && !"STOP".equals(action)
+                && !"PAUSE".equals(action) && !"RESUME".equals(action)) return;
+        long rev = nextRevisionId();
+        AuditLog row = new AuditLog();
+        row.setRevisionId(rev);
+        row.setEntityType("sync_task");
+        row.setEntityId(task.getId());
+        row.setEntityName(task.getTaskName());
+        row.setOpType(action);
+        row.setFieldName("status");
+        row.setOldValue(oldStatus);
+        row.setNewValue(newStatus);
+        fillOperator(row);
+        row.setCreateTime(new Date());
+        safeInsertBatch(Collections.singletonList(row), action, task.getId());
     }
 
     /* ============ 查询 ============ */

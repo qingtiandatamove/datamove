@@ -4,9 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
-import com.ruoyi.datamove.engine.SyncContext;
 import com.ruoyi.datamove.engine.consts.SyncType;
-import com.ruoyi.datamove.engine.log.SyncLogService;
 import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskDiff;
 import com.ruoyi.datamove.task.domain.SyncTaskFieldMapping;
@@ -64,7 +62,6 @@ public class DataVerifyEngine {
     private final SyncTaskFieldMappingMapper  fieldMappingMapper;
     private final SyncTaskVerifyMapper        verifyMapper;
     private final SyncTaskDiffMapper          diffMapper;
-    private final SyncLogService              logService;
     private final ObjectMapper                objectMapper;
 
     /** 同一任务同时只允许一个校验在跑 (key = taskId) */
@@ -80,8 +77,6 @@ public class DataVerifyEngine {
     private static final int  DIFF_FLUSH_SIZE = 200;
     /** 比对进度落库间隔(行) */
     private static final long PROGRESS_EVERY_ROWS = 5000L;
-    /** 校验日志落库间隔(行) */
-    private static final long LOG_EVERY_ROWS = 50000L;
     /** 每批修复条数 */
     private static final int  REPAIR_BATCH = 200;
 
@@ -231,15 +226,13 @@ public class DataVerifyEngine {
         long startMs = System.currentTimeMillis();
 
         long sourceRows = 0, targetRows = 0, missing = 0, mismatch = 0, extra = 0;
-        long lastProgressRows = 0, lastLogRows = 0;
+        long lastProgressRows = 0;
         int saved = 0;
         boolean truncated = false;
         List<SyncTaskDiff> buffer = new ArrayList<>();
 
         String srcSql = buildSelectSql(task.getTableName(), plan.srcIdCol, plan.srcCols);
         String tgtSql = buildSelectSql(task.getTableName(), plan.tgtIdCol, plan.tgtCols);
-        SyncContext logCtx = SyncContext.builder().task(task).build();
-
         try (Connection srcConn = JdbcUtils.newConnection(srcDs);
              Connection tgtConn = JdbcUtils.newConnection(tgtDs);
              RowCursor sc = new RowCursor(srcConn, srcSql, plan.srcCols, plan.idIdx);
@@ -308,13 +301,6 @@ public class DataVerifyEngine {
                     updateVerifyProgress(verifyId, sourceRows, targetRows, missing, mismatch, extra,
                             saved, truncated, sHas ? sc.key() : null);
                 }
-                if (done - lastLogRows >= LOG_EVERY_ROWS) {
-                    lastLogRows = done;
-                    logService.writeLog(logCtx, (int) (done / LOG_EVERY_ROWS),
-                            String.valueOf(sHas ? sc.key() : "-"), "-", 0, done,
-                            System.currentTimeMillis() - startMs, SyncType.LOG_RUNNING, null,
-                            String.format("已比对 %d 行, 缺失 %d, 不一致 %d, 多余 %d", done, missing, mismatch, extra));
-                }
             }
 
             flushDiffs(buffer);
@@ -343,8 +329,6 @@ public class DataVerifyEngine {
             String summary = String.format("比对完成: 源 %d 行, 目标 %d 行, 缺失 %d, 不一致 %d, 多余 %d%s",
                     sourceRows, targetRows, missing, mismatch, extra,
                     truncated ? " (差异明细超过 " + MAX_SAVED_DIFFS + " 条, 仅保留前 " + MAX_SAVED_DIFFS + " 条)" : "");
-            logService.writeLog(logCtx, 0, "VERIFY", "-", 0, sourceRows + targetRows, costMs,
-                    stopped ? SyncType.LOG_FAILED : SyncType.LOG_SUCCESS, null, summary);
             log.info("[Verify] verifyId={} {} 耗时 {}ms", verifyId, summary, costMs);
 
             // 有差异才告警: 用户既然点了校验, 就是想第一时间知道数据对不上
@@ -360,12 +344,6 @@ public class DataVerifyEngine {
             log.error("[Verify] verifyId={} 校验失败", verifyId, e);
             flushDiffs(buffer);
             markFailed(verifyId, e);
-            try {
-                logService.writeLog(SyncContext.builder().task(task).build(), 0, "VERIFY", "-", 0,
-                        sourceRows + targetRows, System.currentTimeMillis() - startMs,
-                        SyncType.LOG_FAILED, e.getMessage(), null);
-            } catch (Exception ignored) {
-            }
             try {
                 AlertUtils.alert(task, "[DataMove 数据校验] 任务[" + task.getTaskName() + "] 校验失败",
                         e.getMessage());
@@ -453,8 +431,6 @@ public class DataVerifyEngine {
                           SyncTask task, AtomicBoolean stopFlag) {
         long startMs = System.currentTimeMillis();
         long repaired = 0, failed = 0;
-        SyncContext logCtx = SyncContext.builder().task(task).build();
-
         try {
             VerifyPlan plan = buildPlan(task, tgtDs);
             // 修复必须回到源库取"当前值"再写目标: 差异明细里的快照是归一化后的字符串,
@@ -526,8 +502,6 @@ public class DataVerifyEngine {
             verifyMapper.updateById(up);
 
             String summary = String.format("差异修复%s: 成功 %d 行, 失败 %d 行", stopped ? "中止" : "完成", repaired, failed);
-            logService.writeLog(logCtx, 0, "REPAIR", "-", (int) repaired, repaired + failed,
-                    costMs, failed > 0 ? SyncType.LOG_FAILED : SyncType.LOG_SUCCESS, null, summary);
             log.info("[Verify] verifyId={} {} 耗时 {}ms", verifyId, summary, costMs);
         } catch (Exception e) {
             log.error("[Verify] verifyId={} 修复失败", verifyId, e);
