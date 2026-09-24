@@ -65,8 +65,9 @@
         <el-table-column prop="createTime" label="创建时间" width="170" sortable="custom" :sort-orders="['descending','ascending']">
           <template slot-scope="s">{{ fmtTime(s.row.createTime) }}</template>
         </el-table-column>
-        <!-- 操作列: 外面只留高频动作(状态动作/停止/数据校验), 低频与危险动作收进「更多」下拉, 不再平铺 9 个按钮 -->
-        <el-table-column label="操作" min-width="300" fixed="right">
+        <!-- 操作列: 外面只留高频动作(状态动作/停止/数据校验), 低频与危险动作收进「更多」下拉, 不再平铺 9 个按钮
+             小屏适配: 不固定该列(固定列会压缩列宽裁掉按钮), 依赖表格整体横向滚动 (列总宽 > 容器时 el-table 自带整体滚动条) -->
+        <el-table-column label="操作" min-width="300">
           <template slot-scope="s">
             <!-- DDL 类型: 单次操作, 不支持暂停/继续/停止 -->
             <template v-if="s.row.taskType === 'DDL'">

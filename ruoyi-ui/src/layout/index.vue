@@ -5,10 +5,10 @@
         <i class="el-icon-data-analysis"></i>
         <span>DataMove</span>
       </div>
+      <!-- 菜单颜色不用 el-menu 的 background-color/text-color props:
+           那些 props 会生成内联样式, 优先级压过 CSS 变量, 暗色主题下菜单颜色切不过来。
+           统一走下面的 CSS (var(--bg-aside) 在暗色主题下自动变 #0d0d0d) -->
       <el-menu
-        background-color="#001529"
-        text-color="#fff"
-        active-text-color="#007bff"
         router
         :default-active="$route.path">
         <el-menu-item index="/index"><i class="el-icon-house"></i><span>首页</span></el-menu-item>
@@ -110,7 +110,24 @@ export default {
   border-bottom: 1px solid #1e2940;
 }
 .logo i { font-size: 26px; vertical-align: middle; color: #007bff; margin-right: 8px }
-.el-menu { border: 0; background-color: var(--bg-aside) }
+/* 注意: 子菜单展开后的 ul.el-menu--inline 是 el-submenu 组件内部节点, 拿不到本组件的 scoped data-v,
+   scoped 的 .el-menu 只能命中最外层 —— 必须用 >>> 深选择器, 否则子菜单露出 Element 默认白底 */
+.aside >>> .el-menu { border: 0; background-color: var(--bg-aside) }
+/* 侧边菜单配色: 亮/暗主题下侧栏都是深色底 (亮=#001529, 暗=#0d0d0d), 文字统一白色,
+   hover 用半透明白提亮 (两种底色下都自然), 激活项用品牌蓝 */
+.aside >>> .el-menu-item,
+.aside >>> .el-submenu__title {
+  color: #fff;
+  background-color: transparent;
+}
+.aside >>> .el-menu-item:hover,
+.aside >>> .el-submenu__title:hover {
+  background-color: rgba(255, 255, 255, .08);
+  color: #fff;
+}
+.aside >>> .el-menu-item.is-active { color: #007bff; }
+.aside >>> .el-menu-item:focus,
+.aside >>> .el-submenu__title:focus { background-color: transparent; }
 .topbar {
   background: var(--bg-topbar); border-bottom: 1px solid var(--color-border);
   display: flex; align-items: center; justify-content: space-between;
