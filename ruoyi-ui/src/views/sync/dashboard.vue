@@ -724,108 +724,108 @@ export default {
 
 <style scoped>
 .stat-row { margin-bottom: 12px }
-.stat-card { text-align: center }
+.stat-card { text-align: center; background: var(--bg-card) }
 .stat-val { font-size: 22px; font-weight: 600; line-height: 1.2 }
-.stat-label { color: #909399; font-size: 12px; margin-top: 6px }
+.stat-label { color: var(--color-text-secondary); font-size: 12px; margin-top: 6px }
 .block { margin-bottom: 12px }
-.sub { color: #909399; font-size: 12px; margin-left: 8px }
-.empty { color: #909399; font-size: 13px; text-align: center; padding: 24px 0 }
-.muted { color: #c0c4cc }
+.sub { color: var(--color-text-secondary); font-size: 12px; margin-left: 8px }
+.empty { color: var(--color-text-secondary); font-size: 13px; text-align: center; padding: 24px 0 }
+.muted { color: var(--color-text-placeholder) }
 
 .mon {
-  border: 1px solid #ebeef5; border-radius: 4px;
-  padding: 12px; margin-bottom: 12px; background: #fff;
+  border: 1px solid var(--color-border); border-radius: 4px;
+  padding: 12px; margin-bottom: 12px; background: var(--bg-card);
 }
-.mon.paused { background: #fdf6ec; border-color: #f5dab1 }
+.mon.paused { background: rgba(230, 162, 60, .12); border-color: rgba(230, 162, 60, .3) }
 .mon-head { display: flex; align-items: center; gap: 6px; margin-bottom: 4px }
 .mon-name {
-  font-weight: 600; font-size: 14px; color: #303133;
+  font-weight: 600; font-size: 14px; color: var(--color-text-primary);
   max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mon-sub {
-  color: #909399; font-size: 12px; margin-bottom: 8px;
+  color: var(--color-text-secondary); font-size: 12px; margin-bottom: 8px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .mon-progress {
   display: flex; justify-content: space-between;
-  color: #606266; font-size: 12px; margin: 2px 0 10px;
+  color: var(--color-text-regular); font-size: 12px; margin: 2px 0 10px;
 }
-.mon-nodata { color: #E6A23C; font-size: 12px; margin-bottom: 6px }
-.mon-progress .right { color: #909399 }
+.mon-nodata { color: var(--color-warning); font-size: 12px; margin-bottom: 6px }
+.mon-progress .right { color: var(--color-text-secondary) }
 .mon-grid {
   display: grid; grid-template-columns: 1fr 1fr;
-  gap: 8px 12px; padding: 8px 0; border-top: 1px dashed #ebeef5;
+  gap: 8px 12px; padding: 8px 0; border-top: 1px dashed var(--color-border);
 }
-.mon-grid .k { color: #909399; font-size: 12px }
-.mon-grid .v { color: #303133; font-size: 15px; font-weight: 600; font-family: Menlo, Consolas, monospace }
-.mon-grid .v i { font-size: 12px; font-weight: 400; color: #909399; font-style: normal }
+.mon-grid .k { color: var(--color-text-secondary); font-size: 12px }
+.mon-grid .v { color: var(--color-text-primary); font-size: 15px; font-weight: 600; font-family: Menlo, Consolas, monospace }
+.mon-grid .v i { font-size: 12px; font-weight: 400; color: var(--color-text-secondary); font-style: normal }
 .mon-foot {
   display: flex; flex-wrap: wrap; gap: 12px;
-  border-top: 1px dashed #ebeef5; padding-top: 8px;
-  color: #909399; font-size: 12px;
+  border-top: 1px dashed var(--color-border); padding-top: 8px;
+  color: var(--color-text-secondary); font-size: 12px;
 }
-.mon-foot b { color: #606266; font-weight: 600 }
+.mon-foot b { color: var(--color-text-regular); font-weight: 600 }
 .mon-actions { margin-top: 10px; text-align: right }
 
 /* 分片实时监控 */
 .shards {
   margin-top: 10px; padding-top: 8px;
-  border-top: 1px dashed #ebeef5;
+  border-top: 1px dashed var(--color-border);
 }
 .shards-title {
-  color: #909399; font-size: 12px; margin-bottom: 6px;
+  color: var(--color-text-secondary); font-size: 12px; margin-bottom: 6px;
   display: flex; align-items: center; gap: 4px;
 }
 .shard-row {
   display: flex; align-items: center; gap: 10px;
-  font-size: 12px; color: #606266;
+  font-size: 12px; color: var(--color-text-regular);
   padding: 3px 8px; border-radius: 3px;
   font-family: Menlo, Consolas, monospace;
 }
-.shard-row:nth-child(even) { background: #fafafa }
-.shard-row.failed { background: #fef0f0 }
+.shard-row:nth-child(even) { background: var(--bg-hover) }
+.shard-row.failed { background: rgba(245, 108, 108, .12) }
 .shard-row.done { opacity: 0.65 }
 .shard-row .s-no {
-  flex: none; width: 28px; font-weight: 600; color: #409EFF;
+  flex: none; width: 28px; font-weight: 600; color: var(--color-primary);
 }
 .shard-row .s-range {
   flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.shard-row .s-cur { flex: none; color: #909399 }
+.shard-row .s-cur { flex: none; color: var(--color-text-secondary) }
 .shard-row .s-rows { flex: none; min-width: 90px; text-align: right }
-.shard-row .s-rate { flex: none; min-width: 70px; text-align: right; color: #303133; font-weight: 600 }
+.shard-row .s-rate { flex: none; min-width: 70px; text-align: right; color: var(--color-text-primary); font-weight: 600 }
 .shard-row .el-tag { flex: none; margin-left: auto }
 
 /* 运行历史 */
 .run-chart-head {
-  color: #606266; font-size: 12px; margin-bottom: 6px;
+  color: var(--color-text-regular); font-size: 12px; margin-bottom: 6px;
   display: flex; align-items: center; gap: 8px;
 }
 .run-chart { height: 180px; width: 100% }
 .run-stat { margin: 10px 0 4px }
 .run-cell {
-  border: 1px solid #ebeef5; border-radius: 4px;
-  text-align: center; padding: 8px 4px; background: #fafcff;
+  border: 1px solid var(--color-border); border-radius: 4px;
+  text-align: center; padding: 8px 4px; background: var(--bg-hover);
 }
 .run-val { font-size: 17px; font-weight: 600; line-height: 1.2 }
-.run-label { color: #909399; font-size: 12px; margin-top: 4px }
-.run-filter { margin-top: 10px; padding-top: 10px; border-top: 1px dashed #ebeef5 }
+.run-label { color: var(--color-text-secondary); font-size: 12px; margin-top: 4px }
+.run-filter { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--color-border) }
 .run-page { margin-top: 10px; text-align: right }
-.last-run { margin-left: 6px; color: #606266; font-size: 12px }
-.last-run-sub { color: #909399; font-size: 12px }
-.danger { color: #f56c6c; font-weight: 600 }
-.clear-tip { color: #909399; font-size: 12px; margin-left: 6px }
+.last-run { margin-left: 6px; color: var(--color-text-regular); font-size: 12px }
+.last-run-sub { color: var(--color-text-secondary); font-size: 12px }
+.danger { color: #ff8585; font-weight: 600 }
+.clear-tip { color: var(--color-text-secondary); font-size: 12px; margin-left: 6px }
 
-.d-wrap .d-row { display: flex; margin-bottom: 10px; font-size: 13px; color: #333 }
-.d-wrap .d-label { width: 92px; flex: none; color: #909399 }
+.d-wrap .d-row { display: flex; margin-bottom: 10px; font-size: 13px; color: var(--color-text-primary) }
+.d-wrap .d-label { width: 92px; flex: none; color: var(--color-text-secondary) }
 .err-pre {
   flex: 1; margin: 0; padding: 10px; max-height: 160px; overflow: auto;
-  background: #fef0f0; border: 1px solid #fde2e2; border-radius: 4px; color: #f56c6c;
+  background: rgba(245, 108, 108, .12); border: 1px solid rgba(245, 108, 108, .25); border-radius: 4px; color: #ff8585;
   font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
 
-/* 失败 / 运行中的历史行高亮 */
+/* 失败 / 运行中的历史行高亮 (亮色); 暗色下由全局 element-dark.scss 覆盖为半透明品牌色 */
 /deep/ .el-table .failed-row td { background: #fef0f0 !important }
 /deep/ .el-table .running-row td { background: #f0f9eb !important }
 </style>

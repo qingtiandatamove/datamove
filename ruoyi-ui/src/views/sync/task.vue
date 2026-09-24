@@ -1275,7 +1275,7 @@ function cssEscape (s) {
 .fm-line-close-bg { fill: #fff; stroke: #F56C6C; stroke-width: 1; cursor: pointer }
 .fm-line-close-x  { fill: #F56C6C; font-size: 13px; cursor: pointer; font-family: Arial }
 
-.fm-col { background: #fff; border: 1px solid #ebeef5; border-radius: 4px; overflow: hidden; z-index: 1 }
+.fm-col { background: var(--bg-card); border: 1px solid var(--color-border); border-radius: 4px; overflow: hidden; z-index: 1 }
 .fm-col-head {
   background: #f5f7fa;
   padding: 6px 10px;
@@ -1302,7 +1302,7 @@ function cssEscape (s) {
 .fm-item:hover { background: #ecf5ff; border-color: #b3d8ff; }
 .fm-item-src:active { cursor: grabbing }
 .fm-item-tgt { cursor: default }
-.fm-item-dim { opacity: 0.45; cursor: not-allowed; background: #f5f7fa }
+.fm-item-dim { opacity: 0.45; cursor: not-allowed; background: var(--bg-hover) }
 /* 拖拽中: 源行高亮 (正在被拖) / 目标行绿色高亮 (可放置) */
 .fm-item-picking { background: #ecf5ff; border-color: #409EFF; box-shadow: 0 0 0 2px rgba(64,158,255,.2) }
 .fm-item-drop { background: #f0f9eb; border-color: #b3e19d; box-shadow: 0 0 0 2px rgba(103,194,58,.25) }

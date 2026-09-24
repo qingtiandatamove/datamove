@@ -174,6 +174,7 @@ export default {
       trendLoaded: false,
       trendTotal: 0,
       trendFailed: 0,
+      trendData: null,
       chart: null,
       resizeHandler: null
     }
@@ -226,10 +227,16 @@ export default {
     this.load()
     this.resizeHandler = () => { if (this.chart) this.chart.resize() }
     window.addEventListener('resize', this.resizeHandler)
+    // 监听主题切换, 重绘图表颜色
+    this.themeHandler = e => {
+      if (e.key === 'datamove-theme') this.onThemeChange()
+    }
+    window.addEventListener('storage', this.themeHandler)
   },
   beforeDestroy () {
     if (this.nowTimer) clearInterval(this.nowTimer)
     if (this.resizeHandler) window.removeEventListener('resize', this.resizeHandler)
+    if (this.themeHandler) window.removeEventListener('storage', this.themeHandler)
     if (this.chart) { this.chart.dispose(); this.chart = null }
   },
   methods: {
@@ -254,6 +261,9 @@ export default {
       this.buildLic(lic.data)
       this.loadTrend()
     },
+    isThemeDark () {
+      return document.documentElement.classList.contains('theme-dark')
+    },
     async loadTrend () {
       this.trendLoading = true
       try {
@@ -262,6 +272,7 @@ export default {
         this.trendTotal  = data.reduce((s, x) => s + (Number(x.rows) || 0), 0)
         this.trendFailed = data.reduce((s, x) => s + (Number(x.failedCount) || 0), 0)
         this.trendLoaded = true
+        this.trendData = data   // 缓存, 切主题时直接重绘
         await this.$nextTick()
         this.renderTrend(data)
       } catch (e) { /* 失败就空图 */ } finally { this.trendLoading = false }
@@ -269,14 +280,23 @@ export default {
     renderTrend (data) {
       if (!this.$refs.trendChart) return
       if (!this.chart) this.chart = echarts.init(this.$refs.trendChart)
+      const dark = this.isThemeDark()
       const dates = data.map(d => d.date.slice(5))   // MM-DD
       const rows  = data.map(d => Number(d.rows) || 0)
       const succ  = data.map(d => Number(d.successCount) || 0)
       const fail  = data.map(d => Number(d.failedCount) || 0)
       const useBar = this.trendDays <= 14
+      // 暗色下坐标/网格/文字用浅色系; 亮色用 Element UI 默认浅灰系
+      const axisColor = dark ? '#606266' : '#dcdfe6'
+      const labelColor = dark ? '#c0c4cc' : '#909399'
+      const splitColor = dark ? 'rgba(255,255,255,.08)' : '#f0f2f5'
       this.chart.setOption({
+        backgroundColor: 'transparent',
         tooltip: {
           trigger: 'axis',
+          backgroundColor: dark ? '#1d1e1f' : '#fff',
+          borderColor: dark ? '#303133' : '#ebeef5',
+          textStyle: { color: dark ? '#e5e7eb' : '#303133' },
           axisPointer: { type: useBar ? 'shadow' : 'line' },
           formatter: params => {
             const day = params[0].axisValue
@@ -287,12 +307,12 @@ export default {
             return html
           }
         },
-        legend: { right: 0, top: 0, icon: 'roundRect', textStyle: { fontSize: 12 } },
+        legend: { right: 0, top: 0, icon: 'roundRect', textStyle: { fontSize: 12, color: labelColor } },
         grid: { left: 8, right: 16, top: 36, bottom: 8, containLabel: true },
-        xAxis: { type: 'category', data: dates, boundaryGap: useBar, axisLine: { lineStyle: { color: '#dcdfe6' } }, axisLabel: { color: '#909399', fontSize: 11 } },
+        xAxis: { type: 'category', data: dates, boundaryGap: useBar, axisLine: { lineStyle: { color: axisColor } }, axisLabel: { color: labelColor, fontSize: 11 } },
         yAxis: [
-          { type: 'value', name: '行数', position: 'left', axisLabel: { color: '#909399', fontSize: 11, formatter: v => v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : v }, splitLine: { lineStyle: { color: '#f0f2f5' } } },
-          { type: 'value', name: '批次', position: 'right', axisLabel: { color: '#909399', fontSize: 11 }, splitLine: { show: false } }
+          { type: 'value', name: '行数', position: 'left', nameTextStyle: { color: labelColor }, axisLine: { lineStyle: { color: axisColor } }, axisLabel: { color: labelColor, fontSize: 11, formatter: v => v >= 1000 ? (v / 1000).toFixed(v >= 10000 ? 0 : 1) + 'k' : v }, splitLine: { lineStyle: { color: splitColor } } },
+          { type: 'value', name: '批次', position: 'right', nameTextStyle: { color: labelColor }, axisLine: { lineStyle: { color: axisColor } }, axisLabel: { color: labelColor, fontSize: 11 }, splitLine: { show: false } }
         ],
         series: [
           { name: '同步行数', type: useBar ? 'bar' : 'line', data: rows, smooth: !useBar, barWidth: useBar ? '50%' : undefined,
@@ -303,6 +323,10 @@ export default {
             itemStyle: { color: '#F56C6C' }, lineStyle: { type: 'dashed' } }
         ]
       }, true)
+    },
+    onThemeChange () {
+      // 监听主题切换: 重新渲染图表以应用对应坐标/网格颜色
+      if (this.trendData) this.renderTrend(this.trendData)
     },
     buildLic (l) {
       if (!l) { this.lic = { loaded: false }; return }
@@ -348,15 +372,19 @@ function pad (n) { return String(n).padStart(2, '0') }
 .home { padding: 0 2px }
 .row  { margin-bottom: 12px }
 .block { margin-bottom: 12px; border-radius: 4px }
-.muted { color: #909399; font-size: 12px; margin-left: 6px }
-.empty { color: #909399; font-size: 13px; text-align: center; padding: 22px 0 }
+.muted { color: var(--color-text-secondary); font-size: 12px; margin-left: 6px }
+.empty { color: var(--color-text-secondary); font-size: 13px; text-align: center; padding: 22px 0 }
 
 /* ============ Hero ============ */
+/* 亮色下保持品牌蓝渐变; 暗色下用深色渐变, 不刺眼 */
 .hero {
   background: linear-gradient(120deg, #1890ff 0%, #096dd9 60%, #0050b3 100%);
   color: #fff; border-radius: 4px; padding: 18px 22px;
   display: flex; justify-content: space-between; align-items: center;
   margin-bottom: 12px;
+}
+html.theme-dark .hero {
+  background: linear-gradient(120deg, #1a4f8a 0%, #143d6b 60%, #0f2d4f 100%);
 }
 .hero-title { font-size: 20px; font-weight: 600 }
 .hero-title i { margin-right: 8px; font-size: 22px }
@@ -369,29 +397,33 @@ function pad (n) { return String(n).padStart(2, '0') }
   display: flex; align-items: center; gap: 10px;
   background: rgba(255,255,255,.12); padding: 8px 14px; border-radius: 4px;
 }
+html.theme-dark .lic-card { background: rgba(255,255,255,.08) }
 .lic-card i { font-size: 22px; opacity: .9 }
 .lic-label { font-size: 11px; opacity: .75 }
 .lic-text  { font-size: 13px; font-weight: 600 }
 .lic-card.tone-orange { background: rgba(230,162,60,.85) }
+html.theme-dark .lic-card.tone-orange { background: rgba(230,162,60,.55) }
 .lic-card.tone-red    { background: rgba(245,108,108,.85) }
+html.theme-dark .lic-card.tone-red    { background: rgba(245,108,108,.55) }
 
 /* ============ Stat cards ============ */
 .stat-card {
   display: flex; align-items: center; gap: 14px;
-  background: #fff; border-radius: 4px; padding: 16px 18px;
+  background: var(--bg-card); border-radius: 4px; padding: 16px 18px;
   box-shadow: 0 1px 4px rgba(0,0,0,.04);
   transition: box-shadow .15s;
 }
 .stat-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,.08) }
+html.theme-dark .stat-card:hover { box-shadow: 0 2px 10px rgba(0,0,0,.35) }
 .stat-icon {
   width: 48px; height: 48px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   font-size: 24px; color: #fff;
 }
 .stat-body { flex: 1; min-width: 0 }
-.stat-val   { font-size: 24px; font-weight: 600; line-height: 1.2 }
-.stat-label { color: #909399; font-size: 12px; margin-top: 2px }
-.stat-hint  { color: #909399; font-size: 11px; margin-top: 2px }
+.stat-val   { font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--color-text-primary) }
+.stat-label { color: var(--color-text-secondary); font-size: 12px; margin-top: 2px }
+.stat-hint  { color: var(--color-text-secondary); font-size: 11px; margin-top: 2px }
 .tone-green .stat-icon { background: #67C23A }
 .tone-blue  .stat-icon { background: #409EFF }
 .tone-orange .stat-icon { background: #E6A23C }
@@ -408,16 +440,17 @@ function pad (n) { return String(n).padStart(2, '0') }
 .quick {
   display: flex; align-items: center; gap: 12px;
   padding: 14px 16px; border-radius: 4px;
-  background: #f5f7fa; cursor: pointer; margin-bottom: 8px;
-  border-left: 3px solid #1890ff;
+  background: var(--bg-hover); cursor: pointer; margin-bottom: 8px;
+  border-left: 3px solid var(--color-primary);
   transition: background .15s, transform .15s;
 }
-.quick:hover { background: #ecf5ff; transform: translateX(2px) }
+.quick:hover { background: var(--bg-card); transform: translateX(2px) }
+html.theme-dark .quick:hover { background: #262727 }
 .quick > i:first-child { font-size: 26px }
 .q-text { flex: 1 }
-.q-title { font-size: 14px; font-weight: 600; color: #303133 }
-.q-desc  { font-size: 12px; color: #909399; margin-top: 2px }
-.q-arrow { color: #c0c4cc }
+.q-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary) }
+.q-desc  { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px }
+.q-arrow { color: var(--color-text-placeholder) }
 .q-blue   { border-left-color: #409EFF }
 .q-blue   i:first-child { color: #409EFF }
 .q-green  { border-left-color: #67C23A }
@@ -431,18 +464,18 @@ function pad (n) { return String(n).padStart(2, '0') }
 .recent { list-style: none; padding: 0; margin: 0 }
 .recent li {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 4px; border-bottom: 1px dashed #ebeef5;
-  font-size: 13px; color: #606266;
+  padding: 8px 4px; border-bottom: 1px solid var(--color-border);
+  font-size: 13px; color: var(--color-text-regular);
 }
 .recent li:last-child { border-bottom: 0 }
 .recent .tag { flex-shrink: 0 }
-.recent .t-name { font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.recent .t-table { color: #909399; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
-.recent .t-msg { color: #F56C6C; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px }
-.recent .t-time { color: #909399; font-size: 12px; margin-left: auto; flex-shrink: 0; font-family: Menlo, Consolas, monospace }
+.recent .t-name { font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary) }
+.recent .t-table { color: var(--color-text-secondary); max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.recent .t-msg { color: #ff8585; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px }
+.recent .t-time { color: var(--color-text-secondary); font-size: 12px; margin-left: auto; flex-shrink: 0; font-family: Menlo, Consolas, monospace }
 
 /* ============ Help ============ */
-.help { margin: 0; padding-left: 22px; color: #606266; line-height: 1.9; font-size: 13px }
-.help a { color: #1890ff; text-decoration: none }
+.help { margin: 0; padding-left: 22px; color: var(--color-text-regular); line-height: 1.9; font-size: 13px }
+.help a { color: var(--color-primary); text-decoration: none }
 .help a:hover { text-decoration: underline }
 </style>

@@ -8,7 +8,7 @@
       <el-menu
         background-color="#001529"
         text-color="#fff"
-        active-text-color="#1890ff"
+        active-text-color="#007bff"
         router
         :default-active="$route.path">
         <el-menu-item index="/index"><i class="el-icon-house"></i><span>首页</span></el-menu-item>
@@ -38,6 +38,16 @@
       <el-header class="topbar">
         <div class="crumb"><i class="el-icon-location" /> {{ crumb }}</div>
         <div class="topright">
+          <!-- 主题切换按钮: 月亮=亮色(点切换到暗色), 太阳=暗色(点切换到亮色) -->
+          <el-tooltip :content="theme === 'dark' ? '切换到亮色' : '切换到暗色'" placement="bottom">
+            <el-button
+              circle
+              size="medium"
+              class="theme-toggle"
+              :icon="theme === 'dark' ? 'el-icon-sunny' : 'el-icon-moon'"
+              @click="toggleTheme" />
+          </el-tooltip>
+
           <el-dropdown @command="onCmd">
             <span class="user-info">
               {{ user.userName || 'admin' }}
@@ -60,12 +70,14 @@
 
 <script>
 export default {
-  data () { return { user: {} } },
+  data () { return { user: {}, theme: 'light' } },
   computed: {
     crumb () { return this.$route.meta?.title || '' }
   },
   mounted () {
     this.user = this.$store.state.user || {}
+    // 从 App.vue 暴露的 __datamoveTheme 读取已应用的主题, 让按钮图标对应当前状态
+    if (window.__datamoveTheme) this.theme = window.__datamoveTheme.get()
   },
   methods: {
     onCmd (cmd) {
@@ -75,6 +87,15 @@ export default {
     async logout () {
       await this.$store.dispatch('logout')
       this.$router.push('/login')
+    },
+    /**
+     * 切换主题 (light ↔ dark): 调用 App.vue 暴露的全局工具, 不在 layout 里直接操作 <html> class,
+     * 避免双源不一致 (App.vue 已监听 storage 事件做跨页签同步)
+     */
+    toggleTheme () {
+      if (!window.__datamoveTheme) return
+      this.theme = window.__datamoveTheme.toggle()
+      this.$message.success(this.theme === 'dark' ? '已切换为暗色主题' : '已切换为亮色主题')
     }
   }
 }
@@ -82,21 +103,30 @@ export default {
 
 <style scoped>
 .layout-container { height: 100vh }
-.aside { background: #001529; color: #fff }
+.aside { background: var(--bg-aside); color: #fff }
 .logo {
   height: 60px; line-height: 60px; color: #fff; text-align: center;
   font-size: 18px; font-weight: bold; letter-spacing: 2px;
   border-bottom: 1px solid #1e2940;
 }
-.logo i { font-size: 26px; vertical-align: middle; color: #1890ff; margin-right: 8px }
-.el-menu { border: 0 }
+.logo i { font-size: 26px; vertical-align: middle; color: #007bff; margin-right: 8px }
+.el-menu { border: 0; background-color: var(--bg-aside) }
 .topbar {
-  background: #fff; border-bottom: 1px solid #eee;
+  background: var(--bg-topbar); border-bottom: 1px solid var(--color-border);
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 20px; height: 56px;
 }
-.crumb { color: #555; font-size: 14px }
-.topright .user-info { cursor: pointer; color: #333 }
-.main { background: #f0f2f5; padding: 16px }
-.el-menu { background: #001529 }
+.crumb { color: var(--color-text-regular); font-size: 14px }
+.topright { display: flex; align-items: center; gap: 12px }
+.topright .user-info { cursor: pointer; color: var(--color-text-primary) }
+.main { background: var(--bg-page); padding: 16px; color: var(--color-text-primary) }
+
+/* 主题切换按钮: 暗色下要重新染色, 亮色下用 Element 默认 */
+.theme-toggle { margin-right: 4px }
+html.theme-dark .theme-toggle {
+  background-color: var(--bg-input);
+  border-color: var(--color-border-darker);
+  color: var(--color-warning);
+  &:hover { background-color: var(--bg-hover); color: var(--color-warning); border-color: var(--color-warning) }
+}
 </style>

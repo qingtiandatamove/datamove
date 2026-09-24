@@ -176,20 +176,20 @@ export default {
 </script>
 
 <style scoped>
-.head-tip { float: right; font-size: 12px; font-weight: normal; color: #909399 }
-.sql-cell { cursor: pointer; color: #1890ff; font-family: Consolas, Menlo, monospace }
-.detail .d-row { display: flex; margin-bottom: 10px; font-size: 13px; color: #333 }
-.detail .d-label { width: 76px; flex: none; color: #909399 }
-.d-meta { margin-left: 8px; color: #606266; font-size: 12px }
-.d-ua { color: #909399; font-size: 12px; word-break: break-all }
+.head-tip { float: right; font-size: 12px; font-weight: normal; color: var(--color-text-secondary) }
+.sql-cell { cursor: pointer; color: var(--color-primary); font-family: Consolas, Menlo, monospace }
+.detail .d-row { display: flex; margin-bottom: 10px; font-size: 13px; color: var(--color-text-primary) }
+.detail .d-label { width: 76px; flex: none; color: var(--color-text-secondary) }
+.d-meta { margin-left: 8px; color: var(--color-text-secondary); font-size: 12px }
+.d-ua { color: var(--color-text-secondary); font-size: 12px; word-break: break-all }
 .sql-pre {
   flex: 1; margin: 0; padding: 10px; max-height: 320px; overflow: auto;
-  background: #f5f7fa; border: 1px solid #ebeef5; border-radius: 4px;
-  font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+  background: var(--bg-hover); border: 1px solid var(--color-border); border-radius: 4px;
+  color: var(--color-text-primary); font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
 .err-pre {
   flex: 1; margin: 0; padding: 10px; max-height: 160px; overflow: auto;
-  background: #fef0f0; border: 1px solid #fde2e2; border-radius: 4px; color: #f56c6c;
+  background: rgba(245, 108, 108, .12); border: 1px solid rgba(245, 108, 108, .25); border-radius: 4px; color: #ff8585;
   font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
 </style>

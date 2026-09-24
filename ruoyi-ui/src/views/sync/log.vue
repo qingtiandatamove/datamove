@@ -430,34 +430,39 @@ export default {
 
 <style scoped>
 .stat-row { margin-bottom: 12px }
-.stat-card { text-align: center }
+.stat-card { text-align: center; background: var(--bg-card) }
 .stat-val { font-size: 22px; font-weight: 600; line-height: 1.2 }
-.stat-label { color: #909399; font-size: 12px; margin-top: 6px }
+.stat-label { color: var(--color-text-secondary); font-size: 12px; margin-top: 6px }
 .q-form .el-form-item { margin-bottom: 6px; margin-right: 10px }
-.quick-bar { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px dashed #ebeef5 }
-.quick-label { color: #909399; font-size: 12px }
+/* 把虚线改成细实线 + 用主题边框色, 暗色下不会突兀 */
+.quick-bar {
+  display: flex; align-items: center; gap: 6px; padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+.quick-label { color: var(--color-text-secondary); font-size: 12px }
 .quick-tag { cursor: pointer }
-.quick-tip { color: #c0c4cc; font-size: 12px; margin-left: 8px }
+.quick-tip { color: var(--color-text-placeholder); font-size: 12px; margin-left: 8px }
 
 .mono { font-family: Consolas, Menlo, monospace; font-size: 12px }
-.arrow { color: #c0c4cc; font-style: normal }
-.content-cell { cursor: pointer; color: #1890ff; font-family: Consolas, Menlo, monospace; font-size: 12px }
-.err-cell { cursor: pointer; color: #f56c6c; font-family: Consolas, Menlo, monospace; font-size: 12px }
-.empty-cell { color: #c0c4cc }
+.arrow { color: var(--color-text-placeholder); font-style: normal }
+.content-cell { cursor: pointer; color: var(--color-primary); font-family: Consolas, Menlo, monospace; font-size: 12px }
+.err-cell { cursor: pointer; color: #ff8585; font-family: Consolas, Menlo, monospace; font-size: 12px }
+.empty-cell { color: var(--color-text-placeholder) }
 
-.detail .d-row { display: flex; margin-bottom: 10px; font-size: 13px; color: #333 }
-.detail .d-label { width: 76px; flex: none; color: #909399 }
-.d-meta { margin-left: 8px; color: #606266; font-size: 12px }
-.d-ua { color: #909399; font-size: 12px; word-break: break-all }
+.detail .d-row { display: flex; margin-bottom: 10px; font-size: 13px; color: var(--color-text-primary) }
+.detail .d-label { width: 76px; flex: none; color: var(--color-text-secondary) }
+.d-meta { margin-left: 8px; color: var(--color-text-secondary); font-size: 12px }
+.d-ua { color: var(--color-text-secondary); font-size: 12px; word-break: break-all }
 .content-pre {
   flex: 1; margin: 0; padding: 10px; max-height: 360px; overflow: auto;
-  background: #f5f7fa; border: 1px solid #ebeef5; border-radius: 4px;
-  font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
+  background: var(--bg-hover); border: 1px solid var(--color-border); border-radius: 4px;
+  color: var(--color-text-primary); font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
 .err-pre {
   flex: 1; margin: 0; padding: 10px; max-height: 160px; overflow: auto;
-  background: #fef0f0; border: 1px solid #fde2e2; border-radius: 4px; color: #f56c6c;
+  background: rgba(245, 108, 108, .12); border: 1px solid rgba(245, 108, 108, .25); border-radius: 4px; color: #ff8585;
   font-family: Consolas, Menlo, monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;
 }
+/* 失败行底色: 亮色下保持浅红, 暗色下由全局 element-dark.scss 覆盖为半透明红 */
 /deep/ .el-table .failed-row td { background: #fef0f0 !important }
 </style>

@@ -1,0 +1,61 @@
+/* 主题 CSS 变量
+ * - 切换: <html class="theme-dark"> 切换为暗色
+ * - 持久化: localStorage('datamove-theme') = 'light' | 'dark'
+ * - 实现: layout/index.vue 顶栏切换按钮
+ */
+
+:root {
+  /* 背景层 */
+  --bg-page:        #f0f2f5;
+  --bg-card:        #ffffff;
+  --bg-topbar:      #ffffff;
+  --bg-aside:       #001529;
+  --bg-hover:       #f5f7fa;
+  --bg-input:       #ffffff;
+
+  /* 文字色 */
+  --color-text-primary:   #303133;
+  --color-text-regular:   #606266;
+  --color-text-secondary: #909399;
+  --color-text-placeholder: #c0c4cc;
+
+  /* 边框/分割线 */
+  --color-border:        #ebeef5;
+  --color-border-light:  #f2f6fc;
+  --color-border-darker: #dcdfe6;
+
+  /* 状态色保持品牌一致 (Element UI 默认值, 暗色下也能用) */
+  --color-primary:   #409eff;
+  --color-success:   #67c23a;
+  --color-warning:   #e6a23c;
+  --color-danger:    #f56c6c;
+  --color-info:      #909399;
+
+  /* Element UI 2.x 的 mix 层覆盖, 暗色下靠这些变量让组件感知 (不覆盖组件内部样式, 只暴露给我们的 scss 使用) */
+  --el-color-primary: #409eff;
+}
+
+/* 暗色主题: html.theme-dark 激活
+ * 设计原则:
+ *   - 背景: 深灰 #141414 / #1d1e1f (避免纯黑刺眼)
+ *   - 文字: 主色 #e5e7eb (高对比度但不死白)
+ *   - 边框: #303133 (比背景略亮一档, 区分结构)
+ *   - 主色: 仍用 Element UI 默认蓝 (#409eff 在暗色背景下仍清晰)
+ */
+html.theme-dark {
+  --bg-page:        #141414;
+  --bg-card:        #1d1e1f;
+  --bg-topbar:      #141414;
+  --bg-aside:       #0d0d0d;
+  --bg-hover:       #262727;
+  --bg-input:       #262727;
+
+  --color-text-primary:   #e5e7eb;
+  --color-text-regular:   #c0c4cc;
+  --color-text-secondary: #909399;
+  --color-text-placeholder: #606266;
+
+  --color-border:        #303133;
+  --color-border-light:  #262727;
+  --color-border-darker: #4c4d4f;
+}
