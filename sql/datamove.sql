@@ -399,11 +399,12 @@ VALUES
 (101, '数据源管理', 100, 1, 'datasource', 'sync/datasource/index', '1', 'C', '0', '0', 'sync:datasource:list', 'dict'),
 (102, '同步任务', 100, 2, 'task', 'sync/task/index', '1', 'C', '0', '0', 'sync:task:list', 'build'),
 (103, '同步日志', 100, 3, 'log', 'sync/log/index', '1', 'C', '0', '0', 'sync:log:list', 'log'),
-(104, '授权管理', 100, 4, 'license', 'sync/license/index', '1', 'C', '0', '0', 'sync:license:list', 'valid-code'),
 (106, '审计日志', 100, 5, 'audit', 'sync/audit/index', '1', 'C', '0', '0', 'sync:audit:list', 'log'),
-(105, '用户管理', 0, 6, 'system/user', 'system/user/index', '1', 'C', '0', '0', 'system:user:list', 'user');
+(105, '系统管理', 0, 6, 'system', NULL, '1', 'M', '0', '0', '', 'tree'),
+(107, '用户管理', 105, 1, 'user', 'system/user/index', '1', 'C', '0', '0', 'system:user:list', 'user'),
+(104, '授权管理', 105, 2, 'license', 'sync/license/index', '1', 'C', '0', '0', 'sync:license:list', 'valid-code');
 
-INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 100), (1, 101), (1, 102), (1, 103), (1, 104), (1, 105), (1, 106),
+INSERT INTO `sys_role_menu` (`role_id`, `menu_id`) VALUES (1, 100), (1, 101), (1, 102), (1, 103), (1, 104), (1, 105), (1, 106), (1, 107),
 (2, 100), (2, 101), (2, 102), (2, 103);
 
 -- 同步任务表的菜单按钮权限 (管理员独占)

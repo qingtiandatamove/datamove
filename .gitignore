@@ -67,3 +67,7 @@ src/main/resources/application-local.yml
 # ---------- 前端构建产物 ----------
 # npm run build 的输出, 不入仓(源码在 ruoyi-ui/src)
 ruoyi-ui/dist/
+
+# ---------- 本地文档 ----------
+# 文章草稿, 不入库
+CSDN.md
