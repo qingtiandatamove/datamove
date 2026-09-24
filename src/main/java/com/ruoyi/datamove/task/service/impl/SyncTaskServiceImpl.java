@@ -13,14 +13,17 @@ import com.ruoyi.datamove.engine.incr.CanalSyncEngine;
 import com.ruoyi.datamove.engine.metrics.TaskMetrics;
 import com.ruoyi.datamove.engine.metrics.TaskMetricsRegistry;
 import com.ruoyi.datamove.task.domain.SyncTask;
+import com.ruoyi.datamove.task.domain.SyncTaskFieldMapping;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.domain.SyncTaskRun;
 import com.ruoyi.datamove.task.domain.TaskDashboardVO;
+import com.ruoyi.datamove.task.mapper.SyncTaskFieldMappingMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskLogMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskRunMapper;
+import com.ruoyi.datamove.task.service.ISyncTaskFieldMappingService;
 import com.ruoyi.datamove.task.service.ISyncTaskService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -40,16 +43,17 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class SyncTaskServiceImpl implements ISyncTaskService {
 
-    private final SyncTaskMapper          taskMapper;
-    private final SyncTaskProgressMapper  progressMapper;
-    private final SyncTaskLogMapper       logMapper;
-    private final SyncTaskRunMapper       runMapper;
-    private final SyncDatasourceMapper    datasourceMapper;
-    private final FullSyncEngine          fullSyncEngine;
-    private final CanalSyncEngine         canalSyncEngine;
-    private final DdlSyncEngine           ddlSyncEngine;
-    private final TaskMetricsRegistry     metricsRegistry;
-    private final AuditLogService         auditLogService;
+    private final SyncTaskMapper                  taskMapper;
+    private final SyncTaskProgressMapper          progressMapper;
+    private final SyncTaskLogMapper               logMapper;
+    private final SyncTaskRunMapper               runMapper;
+    private final SyncDatasourceMapper            datasourceMapper;
+    private final FullSyncEngine                  fullSyncEngine;
+    private final CanalSyncEngine                 canalSyncEngine;
+    private final DdlSyncEngine                   ddlSyncEngine;
+    private final TaskMetricsRegistry             metricsRegistry;
+    private final AuditLogService                 auditLogService;
+    private final ISyncTaskFieldMappingService    fieldMappingService;
 
     @Override
     public PageResult<SyncTask> page(String keyword, String taskType, String status,
@@ -170,6 +174,81 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         metricsRegistry.remove(id);
         // 审计: 软删也算「删除」, 记录被删那一刻的字段快照 (合规审计: 任务曾存在过、有过哪些字段配置)
         auditLogService.recordTaskDelete(db);
+    }
+
+    @Override
+    @Transactional
+    public Long clone(Long sourceId) {
+        SyncTask src = taskMapper.selectById(sourceId);
+        if (src == null) throw new RuntimeException("源任务不存在");
+        // 仅允许克隆非运行中的任务: 运行中的任务有 in-flight 引擎线程, 克隆一份的状态字段会和实时内存状态打架
+        if (SyncType.STATUS_RUNNING.equalsIgnoreCase(src.getStatus())) {
+            throw new RuntimeException("运行中的任务不允许克隆, 请先停止任务");
+        }
+
+        // 1. 拷贝主表业务字段
+        SyncTask copy = new SyncTask();
+        // 业务配置 1:1 复制 (syncTaskType, 同步模式, 数据源, 字段, 批次/分片, 覆盖标志, 校验忽略字段,
+        // 告警渠道, Canal 配置, binlog DML 过滤) — 这些是用户实际想要省去重复配置的字段
+        copy.setTaskType(src.getTaskType());
+        copy.setSyncMode(src.getSyncMode());
+        copy.setSourceId(src.getSourceId());
+        copy.setTargetId(src.getTargetId());
+        copy.setIdField(src.getIdField());
+        copy.setTimeField(src.getTimeField());
+        copy.setBatchSize(src.getBatchSize());
+        copy.setShardCount(src.getShardCount());
+        copy.setIgnoreFields(src.getIgnoreFields());
+        copy.setOverwriteFlag(src.getOverwriteFlag());
+        copy.setDingtalkWebhook(src.getDingtalkWebhook());
+        copy.setAlertEmail(src.getAlertEmail());
+        copy.setCanalHost(src.getCanalHost());
+        copy.setCanalPort(src.getCanalPort());
+        copy.setCanalDestination(src.getCanalDestination());
+        copy.setBinlogDmlTypes(src.getBinlogDmlTypes());
+
+        // 强制重置的字段 (运行态 / 启动位点 / 业务标识)
+        copy.setId(null);                                          // 主键重置 → 新增
+        copy.setTaskName(buildCopyName(src.getTaskName()));         // 任务名去重
+        copy.setTableName(null);                                   // 强制清空: 不清空会导致新任务指向同一张表, 重复消费 binlog / 重复写入
+        copy.setStartId(null);                                  // 起始 ID 重置: 用 source 表的实际起始
+        copy.setStartTime(null);                                   // 起始时间重置
+        copy.setStatus(SyncType.STATUS_STOP);                       // 状态强制 STOP
+        // remark 拼接前缀, 备注里能溯源到源任务; 同时避免「保留备注里的「克隆自」前缀」造成越加越长
+        String oldRemark = src.getRemark();
+        String mergedRemark = "克隆自任务 #" + src.getId() + (oldRemark == null || oldRemark.isEmpty() ? "" : "\n" + oldRemark);
+        copy.setRemark(mergedRemark);
+
+        taskMapper.insert(copy);
+
+        // 2. 同步拷贝字段映射 (不拷的话新任务会丢配置, 用户还得再拖一遍; 映射与表名解耦, 表变了也不影响)
+        List<SyncTaskFieldMapping> mappings = fieldMappingService.listByTaskId(src.getId());
+        if (mappings != null && !mappings.isEmpty()) {
+            // 直接复用 replace(): 先删(空表无副作用)再插, 已经在 @Transactional 里
+            // 用 LinkedList 包一层避免被 replace() 内部顺序重排搞乱
+            fieldMappingService.replace(copy.getId(), mappings);
+        }
+
+        // 3. 审计: 用 CREATE 事件记录, 但在备注里加了「克隆自任务#X」便于溯源
+        auditLogService.recordTaskCreate(copy);
+        log.info("[clone] 源任务 #{}({}) → 新任务 #{}, 字段映射 {} 条", src.getId(), src.getTaskName(), copy.getId(), mappings == null ? 0 : mappings.size());
+        return copy.getId();
+    }
+
+    /**
+     * 任务名去重: src.copy → src.copy (2) → src.copy (3) …
+     * 已删(del_flag='1')的名字视作不存在, 因为已删任务不应占名额
+     */
+    private String buildCopyName(String sourceName) {
+        String base = sourceName + ".copy";
+        String candidate = base;
+        int seq = 2;
+        while (true) {
+            Long n = taskMapper.selectCount(
+                    new QueryWrapper<SyncTask>().eq("task_name", candidate).eq("del_flag", "0"));
+            if (n == null || n == 0) return candidate;
+            candidate = base + " (" + (seq++) + ")";
+        }
     }
 
     @Override

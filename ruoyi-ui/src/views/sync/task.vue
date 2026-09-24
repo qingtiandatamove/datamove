@@ -99,6 +99,8 @@
                 更多<i class="el-icon-arrow-down el-icon--right"></i>
               </el-button>
               <el-dropdown-menu slot="dropdown">
+                <el-dropdown-item command="clone" icon="el-icon-document-copy"
+                  :disabled="s.row.status === 'RUNNING'">克隆任务</el-dropdown-item>
                 <el-dropdown-item v-if="s.row.taskType !== 'DDL'" command="reset"
                   icon="el-icon-refresh-left" :disabled="s.row.status === 'RUNNING'">重置进度</el-dropdown-item>
                 <el-dropdown-item command="log" icon="el-icon-tickets">查看日志</el-dropdown-item>
@@ -461,7 +463,7 @@
 </template>
 
 <script>
-import { pageTask, addTask, updateTask, deleteTask,
+import { pageTask, detailTask, addTask, updateTask, deleteTask, cloneTask,
          startTask, pauseTask, resumeTask, stopTask, resetTask, pageLog,
          clearTaskLog, clearLogByFilter,
          listDataSource, listTables, listColumns,
@@ -870,6 +872,7 @@ export default {
      */
     onRowCommand (act, row) {
       const handlers = {
+        clone: 'onClone',
         reset: 'onReset',
         log: 'onLog',
         clearLog: 'onClearTaskLog',
@@ -878,6 +881,27 @@ export default {
       }
       const fn = handlers[act] && this[handlers[act]]
       if (typeof fn === 'function') fn(row)
+    },
+
+    /**
+     * 克隆任务: 后端复制全部业务配置, 重置状态/源表名/起始位点, 返回新 ID。
+     * 克隆后自动打开编辑弹窗, 强制用户修改表名后再保存 (不清空表名会让新任务指向同一张表, 重复消费 binlog)。
+     */
+    onClone (row) {
+      const name = row.taskName
+      this.$confirm(`确认克隆任务「${name}」?\n克隆后会复制全部业务配置(数据源/同步模式/批次/Canal 配置/字段映射), 但会重置状态/源表名/起始位点, 之后跳到编辑页请修改「同步表名」后再保存。`, '克隆任务', { type: 'warning' })
+        .then(() => cloneTask(row.id))
+        .then(r => {
+          const newId = r && r.data
+          if (!newId) { this.$message.error('克隆成功但未返回新任务 ID'); return }
+          this.$message.success(`已克隆为「${name}.copy」, 请修改表名后启动`)
+          // 先刷新列表让新任务可见, 再加载新任务的完整数据进入编辑页 (不重查的话源/目标数据源、字段映射都拿不到)
+          return this.load().then(() => detailTask(newId))
+        }).then(r2 => {
+          if (r2 && r2.data) this.onEdit(r2.data)
+        }).catch(err => {
+          if (err && err !== 'cancel') this.$message.error('克隆失败:' + (err.message || ''))
+        })
     },
 
     /**

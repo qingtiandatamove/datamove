@@ -200,6 +200,8 @@ public class CanalSyncEngine {
         private volatile boolean running = true;
         /** 已应用批次数, 供运行历史回填 */
         private int batchNo = 0;
+        /** 「忽略字段」配置 (run() 里解析一次, applyInsert/applyUpdate 复用; 之前用 run() 的局部变量编译都过不去) */
+        private Set<String> ignoredFields;
 
         public CanalWorker(SyncTask task, CanalConnector connector,
                            SyncDatasource src, SyncDatasource tgt, Long runId) {
@@ -393,7 +395,7 @@ public class CanalSyncEngine {
                 log.info("[IncrSync] task[{}] dmlFilter={}", task.getTaskName(),
                         dmlAllowed == null ? "ALL" : dmlAllowed);
                 // 「忽略字段」过滤: 非 key 列不在 INSERT/UPDATE SQL 中写出 (key 列永远保留)
-                Set<String> ignoredFields = parseIgnoreFields(task.getIgnoreFields());
+                this.ignoredFields = parseIgnoreFields(task.getIgnoreFields());
                 log.info("[IncrSync] task[{}] ignoreFields={}", task.getTaskName(),
                         ignoredFields == null ? "[]" : ignoredFields);
                 TaskMetrics metrics = metricsRegistry.get(task.getId());

@@ -67,6 +67,15 @@ public class SyncTaskController {
         return R.ok();
     }
 
+    /**
+     * 克隆任务: 复制源任务的全部业务配置, 重置状态/源表名/起始位点, 返回新任务 ID
+     */
+    @ApiOperation("克隆任务 (复制配置, 重置运行态)")
+    @PostMapping("/{id}/clone")
+    public R<Long> cloneTask(@PathVariable Long id) {
+        return R.ok(taskService.clone(id));
+    }
+
     /* 同步操作 */
 
     @ApiOperation("启动")

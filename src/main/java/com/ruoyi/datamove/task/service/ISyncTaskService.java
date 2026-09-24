@@ -25,6 +25,14 @@ public interface ISyncTaskService {
 
     void remove(Long id);
 
+    /**
+     * 克隆一个任务: 复制源任务的全部业务配置(数据源/同步模式/批次/分片/过滤/告警/Canal 配置/字段映射等),
+     * 重置运行态字段(状态→STOP、清空源表名与起始位点), 任务名自动加 .copy 后缀去重, 备注开头追加「克隆自任务#X」。
+     * 返回新任务 ID。
+     * 仅允许克隆 STOP / PAUSE / COMPLETED / FAILED 状态的任务, RUNNING 不允许克隆(避免状态错乱)。
+     */
+    Long clone(Long sourceId);
+
     /* 同步生命周期 */
     void start(Long id);
     void pause(Long id);
