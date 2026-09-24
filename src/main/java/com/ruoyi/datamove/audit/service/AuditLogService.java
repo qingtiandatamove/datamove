@@ -58,7 +58,9 @@ public class AuditLogService {
     public void recordTaskCreate(SyncTask task) {
         if (task == null) return;
         long rev = nextRevisionId();
-        List<AuditLog> rows = buildDiffRows(rev, task, null, "CREATE");
+        // CREATE: 仅 after=task, before=null. 原代码写成了 (rev, task, null) 把 task 传给了 before,
+        // 导致 addIfChanged 里 getter.apply(after=null) 直接 NPE, 新任务压根写不进审计
+        List<AuditLog> rows = buildDiffRows(rev, null, task, "CREATE");
         if (rows.isEmpty()) return;
         safeInsertBatch(rows, "CREATE", task.getId());
     }
@@ -74,6 +76,7 @@ public class AuditLogService {
     public void recordTaskDelete(SyncTask task) {
         if (task == null) return;
         long rev = nextRevisionId();
+        // DELETE: 仅 before=task (被删时的快照), after=null. 调用方语义: 记录「任务被删那一刻的全部字段快照」
         List<AuditLog> rows = buildDiffRows(rev, task, null, "DELETE");
         if (rows.isEmpty()) return;
         safeInsertBatch(rows, "DELETE", task.getId());
@@ -209,10 +212,11 @@ public class AuditLogService {
      *   - DELETE:  old=before 当前值; new=null; old=null 时跳过
      */
     private static void addIfChanged(List<AuditLog> rows, long revisionId, SyncTask snapshot, String opType,
-                                     String fieldName, SyncTask before, SyncTask after,
-                                     java.util.function.Function<SyncTask, Object> getter) {
-        String oldVal = valueOf(getter.apply(before));
-        String newVal = valueOf(getter.apply(after));
+                                        String fieldName, SyncTask before, SyncTask after,
+                                        java.util.function.Function<SyncTask, Object> getter) {
+            // CREATE 传 before=null, DELETE 传 after=null. 不做 null 防护 getter.apply(null) 会 NPE
+            String oldVal = before == null ? null : valueOf(getter.apply(before));
+            String newVal = after  == null ? null : valueOf(getter.apply(after));
 
         boolean keep;
         if ("UPDATE".equals(opType)) {

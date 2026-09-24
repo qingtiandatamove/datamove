@@ -30,6 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.SQLIntegrityConstraintViolationException;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -126,6 +127,18 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (SyncType.STATUS_RUNNING.equals(db.getStatus())) {
             throw new RuntimeException("运行中的任务不允许编辑,请先停止任务");
         }
+        // 任务名称唯一性预校验 (排除自身): add() 有同样校验, update 没有 — 缺失会让 DB 唯一索引兜底报 SQL 异常,
+        // 用户看到的是「Duplicate entry ... for key 'sync_task.uk_task_name'」而不是友好提示。
+        if (t.getTaskName() != null && !t.getTaskName().equals(db.getTaskName())) {
+            Long same = taskMapper.selectCount(
+                    new QueryWrapper<SyncTask>()
+                            .eq("task_name", t.getTaskName())
+                            .eq("del_flag", "0")
+                            .ne("id", t.getId()));
+            if (same != null && same > 0) {
+                throw new RuntimeException("任务名称已存在: " + t.getTaskName());
+            }
+        }
         // 审计: 拷贝一份修改前的快照, 待赋值完后与新值对比
         SyncTask snapshot = copy(db);
         db.setTaskName(t.getTaskName());
@@ -164,6 +177,23 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (SyncType.STATUS_RUNNING.equals(db.getStatus())) {
             throw new RuntimeException("运行中的任务不允许删除,请先停止任务");
         }
+        // 软删唯一索引冲突保护:
+        //   uk_task_name 是 (task_name, del_flag),允许「同名一删一存」(历史已删的任务不应占名额)。
+        //   但软删路径是把当前行 del_flag '0'→'1',若 DB 里已存在另一行 (同名, del_flag='1') 就会撞唯一索引,
+        //   典型场景:「创建 A → 删 A → 重建同名 B → 删 B」第二轮删除就报 Duplicate entry。
+        //   解决办法: 删除前先看是否有同名 (del_flag='1') 行,有就把当前行 task_name 加个唯一后缀再软删,
+        //   避免 UPDATE 把两行都变成 (同名, del_flag='1')。
+        //   审计一致性: 改名只发生在 UPDATE 这一刻,记录审计前先快照原始 task 对象,这样审计日志里的 task_name
+        //   还是用户认知中的「真实名字」,带后缀的 DB 行只是临时避让,合规追溯完整。
+        SyncTask snapshot = copy(db);
+        Long tombstone = taskMapper.selectCount(
+                new QueryWrapper<SyncTask>()
+                        .eq("task_name", db.getTaskName())
+                        .eq("del_flag", "1")
+                        .ne("id", id));
+        if (tombstone != null && tombstone > 0) {
+            db.setTaskName(db.getTaskName() + ".del_" + id + "_" + System.currentTimeMillis());
+        }
         db.setDelFlag("1");
         taskMapper.updateById(db);
         // 同步删除日志、断点进度与运行历史
@@ -173,7 +203,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         // 清理运行期实时指标
         metricsRegistry.remove(id);
         // 审计: 软删也算「删除」, 记录被删那一刻的字段快照 (合规审计: 任务曾存在过、有过哪些字段配置)
-        auditLogService.recordTaskDelete(db);
+        // 关键: 用原始 snapshot (没改名) 而不是 db, 否则审计日志里的 task_name 会是 .del_xxx 后缀的避让名
+        auditLogService.recordTaskDelete(snapshot);
     }
 
     @Override
@@ -207,19 +238,25 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         copy.setCanalDestination(src.getCanalDestination());
         copy.setBinlogDmlTypes(src.getBinlogDmlTypes());
 
-        // 强制重置的字段 (运行态 / 启动位点 / 业务标识)
+        // 强制重置的字段 (运行态 / 启动位点)
         copy.setId(null);                                          // 主键重置 → 新增
         copy.setTaskName(buildCopyName(src.getTaskName()));         // 任务名去重
-        copy.setTableName(null);                                   // 强制清空: 不清空会导致新任务指向同一张表, 重复消费 binlog / 重复写入
+        // 同步表名沿用源任务: 符合「复制任务改个表名就能用」语义, 后续用户在编辑页改表名再保存
+        // (这里如果清空成 null, DB 上 sync_task.table_name 是 NOT NULL 会直接报错; 若改成可空, 又要跑迁移)
+        copy.setTableName(src.getTableName());
         copy.setStartId(null);                                  // 起始 ID 重置: 用 source 表的实际起始
         copy.setStartTime(null);                                   // 起始时间重置
         copy.setStatus(SyncType.STATUS_STOP);                       // 状态强制 STOP
+        copy.setDelFlag("0");                                       // 显式设 0: 避免依赖 DB 默认值/逻辑删除配置的隐性行为, 防止被 page() 的 del_flag='0' 过滤掉
         // remark 拼接前缀, 备注里能溯源到源任务; 同时避免「保留备注里的「克隆自」前缀」造成越加越长
         String oldRemark = src.getRemark();
         String mergedRemark = "克隆自任务 #" + src.getId() + (oldRemark == null || oldRemark.isEmpty() ? "" : "\n" + oldRemark);
         copy.setRemark(mergedRemark);
 
-        taskMapper.insert(copy);
+        // 任务名去重 + 唯一索引兜底: buildCopyName 是 check-then-insert, 两个并发克隆同名源任务时
+        // 都会读到「名字可用」然后都 INSERT, 第二个 INSERT 触发 SQLIntegrityConstraintViolationException。
+        // 这里捕获后用 UUID 短后缀强制区分, 避免返回给用户难看的 500。
+        insertWithUniqueName(copy);
 
         // 2. 同步拷贝字段映射 (不拷的话新任务会丢配置, 用户还得再拖一遍; 映射与表名解耦, 表变了也不影响)
         List<SyncTaskFieldMapping> mappings = fieldMappingService.listByTaskId(src.getId());
@@ -249,6 +286,44 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
             if (n == null || n == 0) return candidate;
             candidate = base + " (" + (seq++) + ")";
         }
+    }
+
+    /**
+     * 插入任务, 处理并发克隆时的唯一索引冲突:
+     * buildCopyName 的「check-then-insert」在并发场景下会失效 (两个事务都读到名字可用, 然后第二个 INSERT 报错)。
+     * 捕获 SQLIntegrityConstraintViolationException 后用 UUID 短后缀强制区分, 重试一次就够 — 并发冲突极端罕见,
+     * 重试循环用更多次数反而掩盖了「真的有同名任务存在」的真实情况, 让用户以为系统有问题。
+     */
+    private void insertWithUniqueName(SyncTask copy) {
+        try {
+            taskMapper.insert(copy);
+        } catch (Exception e) {
+            if (isTaskNameUniqueViolation(e)) {
+                String fallback = copy.getTaskName() + "-" + java.util.UUID.randomUUID().toString().substring(0, 8);
+                log.warn("[clone] 任务名 {} 撞唯一索引 (并发克隆), 回退为 {}", copy.getTaskName(), fallback);
+                copy.setTaskName(fallback);
+                taskMapper.insert(copy);
+            } else {
+                throw e;
+            }
+        }
+    }
+
+    /**
+     * 判断异常是否是 sync_task.uk_task_name 唯一索引冲突 (JDBC 层)
+     */
+    private boolean isTaskNameUniqueViolation(Throwable e) {
+        Throwable cur = e;
+        while (cur != null) {
+            if (cur instanceof SQLIntegrityConstraintViolationException) {
+                String msg = cur.getMessage();
+                // 数据库驱动返回的 message 形如:
+                //   Duplicate entry 'xxx' for key 'sync_task.uk_task_name'
+                return msg != null && msg.contains("uk_task_name");
+            }
+            cur = cur.getCause();
+        }
+        return false;
     }
 
     @Override

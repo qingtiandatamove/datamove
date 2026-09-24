@@ -68,7 +68,8 @@ public class SyncTaskController {
     }
 
     /**
-     * 克隆任务: 复制源任务的全部业务配置, 重置状态/源表名/起始位点, 返回新任务 ID
+     * 克隆任务: 复制源任务的全部业务配置 (含同步表名), 重置状态/起始位点, 返回新任务 ID。
+     * 新任务 status=STOP, 必须先在编辑页修改表名再启动, 否则会与源任务写入同一张表。
      */
     @ApiOperation("克隆任务 (复制配置, 重置运行态)")
     @PostMapping("/{id}/clone")

@@ -115,12 +115,26 @@
       </el-table>
 
       <el-pagination
-        style="margin-top:16px" background layout="prev, pager, next, total"
-        :total="page.total" :page-size="query.pageSize" :current-page.sync="query.pageNum" @current-change="load" />
+        style="margin-top:16px" background
+        layout="total, sizes, prev, pager, next, jumper"
+        :total="page.total"
+        :page-sizes="[10, 20, 50, 100]"
+        :page-size.sync="query.pageSize"
+        :current-page.sync="query.pageNum"
+        @size-change="onPageSizeChange"
+        @current-change="load" />
     </el-card>
 
     <!-- 新增/编辑弹窗 -->
     <el-dialog :title="form.id ? '编辑任务' : '新建任务'" :visible.sync="dialog" width="900px" @closed="onDialogClosed">
+      <!-- 克隆提示: 后端已复制全部业务配置, 但表名沿用源任务, 直接启动会重复同步同一张表 → 强提示用户改表名+任务名 -->
+      <el-alert v-if="cloneHint" type="warning" :closable="false" show-icon style="margin-bottom:12px">
+        <template slot="title">这是从任务 #{{ cloneHint.sourceId }} 克隆过来的新任务</template>
+        <div style="font-size:13px;line-height:1.6">
+          已复制:数据源、同步模式、批次/分片、Canal 配置、字段映射等<br/>
+          <b>请修改「同步表名」(不修改会重复同步源任务那张表)和「任务名称」(后端已加 .copy 后缀, 但你可以再改)后启动</b>
+        </div>
+      </el-alert>
       <el-tabs v-model="tabActive" :before-leave="onBeforeTabLeave">
         <el-tab-pane label="基本信息" name="base">
           <el-form ref="form" :model="form" :rules="rules" label-width="110px">
@@ -478,6 +492,8 @@ export default {
       page: { rows: [], total: 0 },
       loading: false, dialog: false, saving: false,
       form: { taskType: 'FULL', syncMode: 'ID', batchSize: 1000, ignoreFields: '' },
+      // 克隆提示: { sourceId: 源任务ID } 表示当前打开的弹窗是某个源任务的克隆结果, 顶部展示强提示条
+      cloneHint: null,
       // binlog DML 类型过滤 (勾选数组, 提交时拼成逗号串 binlogDmlTypes; 空 = 全部同步)
       dmlTypes: ['INSERT', 'UPDATE', 'DELETE'],
       rules: {
@@ -722,7 +738,19 @@ export default {
 
     load () {
       this.loading = true
-      pageTask(this.query).then(r => { this.page = r.data }).catch(() => {}).finally(() => this.loading = false)
+      return pageTask(this.query)
+        .then(r => { this.page = r.data })
+        .catch(() => {})
+        .finally(() => this.loading = false)
+    },
+    /**
+     * 切每页条数: Element UI 默认会保留当前 pageNum,但 pageNum 越界(比如当前在第 5 页*10 = 第 50 条,切到 100 条/页后第 5 页其实在第 401 条) 会出现「明明有数据却显示空页」。
+     * 强制 pageNum=1 避免这个空页坑, 选多少都是从头看,简单可预期。
+     */
+    onPageSizeChange (size) {
+      this.query.pageSize = size
+      this.query.pageNum = 1
+      this.load()
     },
     loadDatasources () {
       listDataSource().then(r => { this.datasources = r.data || [] }).catch(() => {})
@@ -794,6 +822,7 @@ export default {
     },
     onDialogClosed () {
       this.form = {}
+      this.cloneHint = null   // 关闭弹窗时清掉克隆提示, 下次进入编辑页不再误显示
       this.mappings = []; this.sourceFields = []; this.targetFields = []; this.originalMappings = []
       this.tabActive = 'base'
       this.drag = { active: false, srcName: '', startX: 0, startY: 0, curX: 0, curY: 0, hoverName: '', path: '' }
@@ -889,16 +918,22 @@ export default {
      */
     onClone (row) {
       const name = row.taskName
+      const sourceId = row.id
       this.$confirm(`确认克隆任务「${name}」?\n克隆后会复制全部业务配置(数据源/同步模式/批次/Canal 配置/字段映射), 但会重置状态/源表名/起始位点, 之后跳到编辑页请修改「同步表名」后再保存。`, '克隆任务', { type: 'warning' })
         .then(() => cloneTask(row.id))
-        .then(r => {
+        .then(async r => {
           const newId = r && r.data
-          if (!newId) { this.$message.error('克隆成功但未返回新任务 ID'); return }
+          if (!newId) { this.$message.error('克隆成功但未返回新任务 ID'); return null }
           this.$message.success(`已克隆为「${name}.copy」, 请修改表名后启动`)
-          // 先刷新列表让新任务可见, 再加载新任务的完整数据进入编辑页 (不重查的话源/目标数据源、字段映射都拿不到)
-          return this.load().then(() => detailTask(newId))
+          // 刷新列表让新任务可见, 再加载新任务的完整数据进入编辑页 (源/目标数据源、字段映射都依赖 detail 接口)
+          await this.load()
+          return detailTask(newId)
         }).then(r2 => {
-          if (r2 && r2.data) this.onEdit(r2.data)
+          if (r2 && r2.data) {
+            // 设置克隆提示: 弹窗顶部展示「这是从任务 #X 克隆过来, 请修改表名+任务名」的告警条
+            this.cloneHint = { sourceId }
+            this.onEdit(r2.data)
+          }
         }).catch(err => {
           if (err && err !== 'cancel') this.$message.error('克隆失败:' + (err.message || ''))
         })
