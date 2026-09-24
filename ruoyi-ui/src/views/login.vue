@@ -68,7 +68,27 @@
           <p>Sign in to your workspace</p>
         </div>
 
-        <el-form ref="form" :model="form" :rules="rules" @submit.native.prevent="onLogin">
+        <!-- 登录方式切换 -->
+        <div class="login-mode">
+          <a href="javascript:;"
+            :class="{ active: loginMode === 'password' }"
+            @click="switchMode('password')">
+            <i class="el-icon-key"></i> 账号密码
+          </a>
+          <a href="javascript:;"
+            :class="{ active: loginMode === 'email' }"
+            @click="switchMode('email')">
+            <i class="el-icon-message"></i> 邮箱登录
+          </a>
+          <a href="javascript:;"
+            :class="{ active: loginMode === 'sms' }"
+            @click="switchMode('sms')">
+            <i class="el-icon-mobile-phone"></i> 短信登录
+          </a>
+        </div>
+
+        <!-- 账号密码登录 -->
+        <el-form v-if="loginMode === 'password'" ref="form" :model="form" :rules="rules" @submit.native.prevent="onLogin">
           <el-form-item prop="username">
             <label class="field-label">账号</label>
             <el-input
@@ -103,22 +123,82 @@
           </el-button>
         </el-form>
 
-        <div class="divider"><span>其他登录方式</span></div>
+        <!-- 邮箱验证码登录 -->
+        <el-form v-else-if="loginMode === 'email'" ref="emailForm" :model="emailForm" :rules="emailRules" @submit.native.prevent="onEmailLogin">
+          <el-form-item prop="email">
+            <label class="field-label">邮箱</label>
+            <el-input
+              v-model="emailForm.email"
+              prefix-icon="el-icon-message"
+              placeholder="请输入邮箱地址" />
+          </el-form-item>
+          <el-form-item prop="code">
+            <label class="field-label">验证码</label>
+            <div class="code-row">
+              <el-input
+                v-model="emailForm.code"
+                prefix-icon="el-icon-lock"
+                placeholder="6 位数字验证码"
+                maxlength="6"
+                @keyup.enter.native="onEmailLogin" />
+              <el-button
+                class="send-code-btn"
+                :disabled="codeSending || countdown > 0"
+                :loading="codeSending"
+                @click="sendCode">
+                {{ countdown > 0 ? countdown + 's 后重试' : '获取验证码' }}
+              </el-button>
+            </div>
+          </el-form-item>
 
-        <div class="social-login">
-          <a href="javascript:;" class="social-btn" title="钉钉">
-            <i class="el-icon-chat-dot-square"></i>
-          </a>
-          <a href="javascript:;" class="social-btn" title="企业微信">
-            <i class="el-icon-message"></i>
-          </a>
-          <a href="javascript:;" class="social-btn" title="飞书">
-            <i class="el-icon-share"></i>
-          </a>
-          <a href="javascript:;" class="social-btn" title="SSO">
-            <i class="el-icon-key"></i>
-          </a>
-        </div>
+          <p class="email-tip">
+            <i class="el-icon-info"></i>
+            登录链接将发送至你的邮箱, 首次使用需先绑定
+          </p>
+
+          <el-button type="primary" :loading="loading" class="login-btn" @click="onEmailLogin">
+            <span v-if="!loading">验 证 登 录</span>
+          </el-button>
+        </el-form>
+
+        <!-- 短信验证码登录 -->
+        <el-form v-else-if="loginMode === 'sms'" ref="smsForm" :model="smsForm" :rules="smsRules" @submit.native.prevent="onSmsLogin">
+          <el-form-item prop="phone">
+            <label class="field-label">手机号</label>
+            <el-input
+              v-model="smsForm.phone"
+              prefix-icon="el-icon-mobile-phone"
+              placeholder="请输入手机号"
+              maxlength="11" />
+          </el-form-item>
+          <el-form-item prop="code">
+            <label class="field-label">验证码</label>
+            <div class="code-row">
+              <el-input
+                v-model="smsForm.code"
+                prefix-icon="el-icon-lock"
+                placeholder="6 位数字验证码"
+                maxlength="6"
+                @keyup.enter.native="onSmsLogin" />
+              <el-button
+                class="send-code-btn"
+                :disabled="smsSending || smsCountdown > 0"
+                :loading="smsSending"
+                @click="sendSmsCode">
+                {{ smsCountdown > 0 ? smsCountdown + 's 后重试' : '获取验证码' }}
+              </el-button>
+            </div>
+          </el-form-item>
+
+          <p class="email-tip">
+            <i class="el-icon-info"></i>
+            短信验证码将发送至你绑定的手机号, 注意查收
+          </p>
+
+          <el-button type="primary" :loading="loading" class="login-btn" @click="onSmsLogin">
+            <span v-if="!loading">验 证 登 录</span>
+          </el-button>
+        </el-form>
 
         <p class="copyright">
           © 2026 DataMove ·
@@ -132,6 +212,8 @@
 </template>
 
 <script>
+import { sendSmsCode, sendEmailCode } from '@/api/auth'
+
 export default {
   data () {
     return {
@@ -140,7 +222,16 @@ export default {
       errorTimer: null,
       theme: 'light',
       remember: true,
+      loginMode: 'password',  // 'password' | 'email' | 'sms'
       form: { username: 'admin', password: 'admin123' },
+      emailForm: { email: '', code: '' },
+      smsForm: { phone: '', code: '' },
+      codeSending: false,
+      countdown: 0,
+      codeTimer: null,
+      smsSending: false,
+      smsCountdown: 0,
+      smsCodeTimer: null,
       features: [
         { icon: 'el-icon-data-line',    text: '实时同步大盘' },
         { icon: 'el-icon-connection',   text: '零代码字段映射' },
@@ -151,11 +242,35 @@ export default {
       rules: {
         username: [{ required: true, message: '请输入账号', trigger: 'blur' }],
         password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
+      },
+      emailRules: {
+        email: [
+          { required: true, message: '请输入邮箱', trigger: 'blur' },
+          { type: 'email', message: '邮箱格式不正确', trigger: 'blur' }
+        ],
+        code: [
+          { required: true, message: '请输入验证码', trigger: 'blur' },
+          { len: 6, message: '验证码为 6 位数字', trigger: 'blur' }
+        ]
+      },
+      smsRules: {
+        phone: [
+          { required: true, message: '请输入手机号', trigger: 'blur' },
+          { pattern: /^1[3-9]\d{9}$/, message: '手机号格式不正确', trigger: 'blur' }
+        ],
+        code: [
+          { required: true, message: '请输入验证码', trigger: 'blur' },
+          { len: 6, message: '验证码为 6 位数字', trigger: 'blur' }
+        ]
       }
     }
   },
   mounted () {
     if (window.__datamoveTheme) this.theme = window.__datamoveTheme.get()
+  },
+  beforeDestroy () {
+    if (this.codeTimer) clearInterval(this.codeTimer)
+    if (this.smsCodeTimer) clearInterval(this.smsCodeTimer)
   },
   methods: {
     showError (msg) {
@@ -167,11 +282,96 @@ export default {
       if (!window.__datamoveTheme) return
       this.theme = window.__datamoveTheme.toggle()
     },
+    switchMode (mode) {
+      if (this.loginMode === mode) return
+      this.loginMode = mode
+      this.errorMsg = ''
+    },
+    sendCode () {
+      if (!this.emailForm.email) {
+        this.$message.warning('请先输入邮箱地址')
+        return
+      }
+      // 简单邮箱格式校验 (避免发空邮件)
+      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(this.emailForm.email)
+      if (!ok) {
+        this.$message.warning('邮箱格式不正确')
+        return
+      }
+      this.codeSending = true
+      sendEmailCode(this.emailForm.email).then(() => {
+        this.codeSending = false
+        this.countdown = 60
+        const masked = this.emailForm.email.replace(/(.{2}).+(@.+)/, '$1***$2')
+        this.$message.success(`验证码已发送至 ${masked}`)
+        this.codeTimer = setInterval(() => {
+          this.countdown -= 1
+          if (this.countdown <= 0) {
+            clearInterval(this.codeTimer)
+            this.countdown = 0
+          }
+        }, 1000)
+      }).catch(err => {
+        this.codeSending = false
+        this.$message.error((err && err.message) || '验证码发送失败')
+      })
+    },
     onLogin () {
       this.$refs.form.validate(ok => {
         if (!ok) return
         this.loading = true
         this.$store.dispatch('login', this.form).then(() => {
+          this.$message.success('登录成功')
+          this.$router.push('/')
+        }).catch(err => {
+          this.showError(err.message || '登录失败')
+        }).finally(() => { this.loading = false })
+      })
+    },
+    onEmailLogin () {
+      this.$refs.emailForm.validate(ok => {
+        if (!ok) return
+        this.loading = true
+        this.$store.dispatch('loginByEmail', this.emailForm).then(() => {
+          this.$message.success('登录成功')
+          this.$router.push('/')
+        }).catch(err => {
+          this.showError(err.message || '登录失败')
+        }).finally(() => { this.loading = false })
+      })
+    },
+    sendSmsCode () {
+      if (!this.smsForm.phone) {
+        this.$message.warning('请先输入手机号')
+        return
+      }
+      if (!/^1[3-9]\d{9}$/.test(this.smsForm.phone)) {
+        this.$message.warning('手机号格式不正确')
+        return
+      }
+      this.smsSending = true
+      sendSmsCode(this.smsForm.phone).then(() => {
+        this.smsSending = false
+        this.smsCountdown = 60
+        const masked = this.smsForm.phone.replace(/^(\d{3})\d{4}/, '$1****')
+        this.$message.success(`验证码已发送至 ${masked}`)
+        this.smsCodeTimer = setInterval(() => {
+          this.smsCountdown -= 1
+          if (this.smsCountdown <= 0) {
+            clearInterval(this.smsCodeTimer)
+            this.smsCountdown = 0
+          }
+        }, 1000)
+      }).catch(err => {
+        this.smsSending = false
+        this.$message.error((err && err.message) || '验证码发送失败')
+      })
+    },
+    onSmsLogin () {
+      this.$refs.smsForm.validate(ok => {
+        if (!ok) return
+        this.loading = true
+        this.$store.dispatch('loginBySms', this.smsForm).then(() => {
           this.$message.success('登录成功')
           this.$router.push('/')
         }).catch(err => {
@@ -407,6 +607,84 @@ html.theme-dark .card-brand {
   font-family: "JetBrains Mono", Consolas, monospace;
 }
 
+/* ---------- 登录方式切换 ---------- */
+.login-mode {
+  display: flex;
+  gap: 22px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--color-border-light);
+}
+.login-mode a {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+  transition: all .2s ease;
+  cursor: pointer;
+}
+.login-mode a i { font-size: 14px }
+.login-mode a:hover { color: var(--color-text-regular) }
+.login-mode a.active {
+  color: var(--color-primary);
+  border-bottom-color: var(--color-primary);
+}
+
+/* ---------- 验证码输入行 ---------- */
+.code-row {
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+}
+.code-row /deep/ .el-input { flex: 1; min-width: 0 }
+.send-code-btn {
+  flex: none;
+  width: 110px;
+  height: 40px;
+  border-radius: 8px !important;
+  font-size: 12px !important;
+  padding: 0 !important;
+  letter-spacing: .5px;
+  background: var(--bg-hover) !important;
+  border-color: var(--color-border) !important;
+  color: var(--color-primary) !important;
+  transition: all .2s ease;
+}
+.send-code-btn:not([disabled]):hover {
+  background: var(--color-primary) !important;
+  border-color: var(--color-primary) !important;
+  color: #fff !important;
+  box-shadow: 0 4px 12px rgba(64, 158, 255, .25);
+}
+.send-code-btn[disabled] {
+  color: var(--color-text-secondary) !important;
+  cursor: not-allowed;
+  background: var(--bg-page) !important;
+}
+
+.email-tip {
+  margin: -2px 0 14px;
+  padding: 8px 10px;
+  background: rgba(64, 158, 255, .08);
+  border: 1px solid rgba(64, 158, 255, .18);
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  line-height: 1.4;
+}
+.email-tip i {
+  color: var(--color-primary);
+  margin-right: 6px;
+  font-size: 13px;
+}
+
 /* ---------- 字段 label + 输入框强化 ---------- */
 .field-label {
   display: block;
@@ -494,51 +772,9 @@ html.theme-dark .field-tip {
 }
 .login-btn:active { transform: translateY(0) }
 
-/* ---------- 分隔线 + 第三方登录 ---------- */
-.divider {
-  display: flex;
-  align-items: center;
-  margin: 20px 0 12px;
-  color: var(--color-text-secondary);
-  font-size: 11px;
-  letter-spacing: .5px;
-}
-.divider::before, .divider::after {
-  content: '';
-  flex: 1;
-  height: 1px;
-  background: var(--color-border);
-}
-.divider span { padding: 0 12px }
-
-.social-login {
-  display: flex;
-  justify-content: center;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-.social-btn {
-  width: 36px; height: 36px;
-  display: flex; align-items: center; justify-content: center;
-  border-radius: 50%;
-  background: var(--bg-hover);
-  border: 1px solid var(--color-border);
-  color: var(--color-text-regular);
-  font-size: 16px;
-  cursor: pointer;
-  transition: all .2s ease;
-  text-decoration: none;
-}
-.social-btn:hover {
-  color: var(--color-primary);
-  border-color: var(--color-primary);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(64, 158, 255, .18);
-}
-
 /* ---------- 底部 ---------- */
 .copyright {
-  margin: 0;
+  margin: 20px 0 0;
   text-align: center;
   font-size: 11px;
   color: var(--color-text-placeholder);

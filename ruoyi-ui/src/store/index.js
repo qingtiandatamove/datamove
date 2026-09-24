@@ -1,6 +1,6 @@
 import Vue from 'vue'
 import Vuex from 'vuex'
-import { login, getInfo, logout, setToken, removeToken } from '@/api/auth'
+import { login, loginBySms, loginByEmail, getInfo, logout, setToken, removeToken } from '@/api/auth'
 
 Vue.use(Vuex)
 
@@ -15,12 +15,19 @@ export default new Vuex.Store({
   actions: {
     login ({ commit }, { username, password }) {
       return login(username, password).then(res => {
-        const d = res.data
-        setToken(d.token)
-        commit('SET_TOKEN', d.token)
-        commit('SET_USER', { userId: d.userId, userName: d.userName, nickName: d.nickName })
-        commit('SET_ROLES', d.roles || [])
-        commit('SET_PERMS', d.permissions || [])
+        commitAndSetToken(commit, res)
+        return res
+      })
+    },
+    loginBySms ({ commit }, { phone, code }) {
+      return loginBySms(phone, code).then(res => {
+        commitAndSetToken(commit, res)
+        return res
+      })
+    },
+    loginByEmail ({ commit }, { email, code }) {
+      return loginByEmail(email, code).then(res => {
+        commitAndSetToken(commit, res)
         return res
       })
     },
@@ -38,3 +45,13 @@ export default new Vuex.Store({
     }
   }
 })
+
+/** 账号密码 / 短信登录共用: 提取 token + 角色 + 权限 + 写 localStorage */
+function commitAndSetToken (commit, res) {
+  const d = res.data
+  setToken(d.token)
+  commit('SET_TOKEN', d.token)
+  commit('SET_USER', { userId: d.userId, userName: d.userName, nickName: d.nickName })
+  commit('SET_ROLES', d.roles || [])
+  commit('SET_PERMS', d.permissions || [])
+}

@@ -86,11 +86,47 @@ sync:
   # 内部通信密钥 (通过环境变量 INNER_SECRET 注入真实值)
   inner-secret: ${INNER_SECRET:CHANGE_ME_INNER_SECRET}
 
+  # ----------------------------------------------------------------------------
+  # 邮件告警 / 邮箱验证码登录 (共用 SMTP 配置)
+  #   enabled=false 时, MailUtils.send 静默跳过 (验证码也会降级到本地日志)
+  #   接入真实邮箱: MAIL_ENABLED=true + MAIL_HOST + MAIL_USERNAME + MAIL_PASSWORD
+  # ----------------------------------------------------------------------------
+  mail:
+    enabled: ${MAIL_ENABLED:false}
+    host: ${MAIL_HOST:smtp.qq.com}
+    port: ${MAIL_PORT:465}
+    protocol: ${MAIL_PROTOCOL:smtps}
+    username: ${MAIL_USERNAME:}
+    # 邮箱授权码 (QQ/网易/Gmail 等第三方 SMTP 都用授权码, 不是登录密码)
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:}
+    ssl: ${MAIL_SSL:true}
+    starttls: ${MAIL_STARTTLS:false}
+    timeout: ${MAIL_TIMEOUT:8000}
+
 # 防止 XSS 存储
 xss:
   enabled: true
   excludes:
     - /system/notice/*
+
+# ----------------------------------------------------------------------------
+# 阿里云短信 (登录验证码)
+# sms.aliyun.enabled=false 时, 验证码仅写入本地日志 (开发环境用, 便于联调)
+# 接入真实网关: SMS_ENABLED=true 并配置 AK / 签名 / 模板
+# ----------------------------------------------------------------------------
+sms:
+  aliyun:
+    enabled: ${SMS_ENABLED:false}
+    access-key-id: ${SMS_AK:}
+    access-key-secret: ${SMS_AKS:}
+    sign-name: ${SMS_SIGN:DataMove}
+    template-code: ${SMS_TEMPLATE:SMS_000000000}
+    endpoint: dysmsapi.aliyuncs.com
+    # 验证码有效期 (秒), 默认 5 分钟
+    code-ttl: 300
+    # 单手机号 1 小时内最大发送次数 (防刷)
+    rate-limit-per-hour: 5
 
 # 日志配置
 logging:

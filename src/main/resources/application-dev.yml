@@ -9,3 +9,9 @@ spring:
 logging:
   level:
     com.ruoyi.datamove: debug
+
+# 阿里云短信: dev 默认关闭, 验证码仅写入本地日志 (查看 datamove-backend.log)
+# 开启前需配置: SMS_ENABLED=true + SMS_AK + SMS_AKS + SMS_SIGN + SMS_TEMPLATE
+sms:
+  aliyun:
+    enabled: false
