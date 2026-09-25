@@ -4,9 +4,10 @@
       <div slot="header" class="clearfix">
         <span>同步任务</span>
         <el-button-group style="float:right">
-          <el-button type="primary" icon="el-icon-plus" size="mini" @click="onAdd('FULL')">新建全量任务</el-button>
-          <el-button type="success" icon="el-icon-plus" size="mini" @click="onAdd('INCR')">新建增量任务</el-button>
-          <el-button type="warning" icon="el-icon-plus" size="mini" @click="onAdd('DDL')">同步表结构</el-button>
+          <!-- 主入口: 4 步向导, 面向不熟系统的操作人员 -->
+          <el-button type="primary" icon="el-icon-magic-stick" size="mini" @click="openWizard">新建任务</el-button>
+          <!-- 次入口: 老的完整表单, 给熟悉参数的高级用户; 编辑已有任务也走同一套 -->
+          <el-button icon="el-icon-edit-outline" size="mini" @click="onAdd('FULL')">高级表单</el-button>
           <el-button plain icon="el-icon-upload2" size="mini" @click="openImportDialog">导入任务</el-button>
           <el-button type="danger" plain icon="el-icon-delete" size="mini" @click="openClearDialog">日志清理</el-button>
         </el-button-group>
@@ -76,10 +77,11 @@
         <el-table-column prop="createTime" label="创建时间" width="170" sortable="custom" :sort-orders="['descending','ascending']">
           <template slot-scope="s">{{ fmtTime(s.row.createTime) }}</template>
         </el-table-column>
-        <!-- 操作列: 外面只留高频动作(状态动作/停止/数据校验), 低频与危险动作收进「更多」下拉, 不再平铺 9 个按钮
-             小屏适配: 列宽必须完整容纳全部按钮(实测 5 个 mini 按钮约 340px) —— 溢出单元格的部分在 el-table
-             滚动区域(按列宽计算)之外, 滚到最右也看不到; min-width 给足 350 保证按钮永远可达 -->
-        <el-table-column label="操作" min-width="350">
+        <!-- 操作列: 外面只留高频动作(状态动作/停止/数据校验/编辑任务), 低频与危险动作收进「更多」下拉, 不再平铺 9 个按钮
+             列宽必须完整容纳全部按钮 + 间距(实测约 390px): 给 min-width=420 让它永远装得下,
+             这样单元格内部不需要 overflow-x 兜底 —— 既不出现操作列自己的横向滚动条,
+             也不会因为内容溢出单元格而「滚到最右仍看不到按钮」(溢出部分在 el-table 滚动区域之外) -->
+        <el-table-column label="操作" min-width="420">
           <template slot-scope="s">
             <!-- DDL 类型: 单次操作, 不支持暂停/继续/停止 -->
             <template v-if="s.row.taskType === 'DDL'">
@@ -378,6 +380,270 @@
       </div>
     </el-dialog>
 
+    <!--
+      新建任务向导: 选源 → 选目标 → 选模式 → 字段映射, 4 步完成。
+      面向不熟悉系统的操作人员: 每步只问一个问题, 高级参数(批次/分片/覆盖/告警)收进折叠面板。
+      复用了字段映射的 .fm-* 舞台 (ref=wizStage, 由 stageEl() 与编辑弹窗区分)。
+    -->
+    <el-dialog title="新建任务向导" :visible.sync="wizard" width="940px" append-to-body
+      :close-on-click-modal="false" @closed="onWizardClosed">
+      <el-steps :active="wizStep" finish-status="success" align-center style="margin-bottom:20px">
+        <el-step title="选源" icon="el-icon-coin" />
+        <el-step title="选目标" icon="el-icon-aim" />
+        <el-step title="选模式" icon="el-icon-set-up" />
+        <el-step title="字段映射" icon="el-icon-share" />
+      </el-steps>
+
+      <div class="wiz-body">
+        <!-- ========== Step 1 选源 ========== -->
+        <div v-show="wizStep === 0">
+          <el-form label-width="110px">
+            <el-form-item label="源数据源" required>
+              <el-select v-model="form.sourceId" filterable placeholder="数据从哪个库来?" style="width:100%">
+                <el-option v-for="d in datasources" :key="d.id" :value="d.id"
+                  :label="d.datasourceName + '  (' + d.host + ':' + d.port + '/' + d.dbName + ')'" />
+              </el-select>
+              <div class="wiz-tip">没找到要用的库? 先到「数据源管理」登记, 并点一次「测试连接」。</div>
+            </el-form-item>
+            <el-form-item label="同步表名" required>
+              <el-select v-model="form.tableName" filterable allow-create clearable
+                placeholder="选择(或直接输入)要同步的表" style="width:100%">
+                <el-option v-for="t in sourceTables" :key="t" :value="t" :label="t" />
+              </el-select>
+              <div class="wiz-tip">源库和目标库使用同一个表名。</div>
+            </el-form-item>
+            <el-alert v-if="srcProbing" type="info" :closable="false" show-icon title="正在读取源表字段..." />
+            <el-alert v-else-if="srcProbe && srcProbe.ok" type="success" :closable="false" show-icon
+              :title="'已读到源表 ' + form.tableName + ', 共 ' + srcProbe.cols + ' 个字段, 可以进入下一步'" />
+            <el-alert v-else-if="srcProbe && !srcProbe.ok" type="error" :closable="false" show-icon
+              title="源库读不到这张表"
+              description="检查表名是否写错, 或回到「数据源管理」重新测试连接。" />
+            <el-alert v-else-if="!datasources.length" type="warning" :closable="false" show-icon
+              title="还没有任何数据源, 请先到「数据源管理」新增。" />
+          </el-form>
+        </div>
+
+        <!-- ========== Step 2 选目标 ========== -->
+        <div v-show="wizStep === 1">
+          <el-form label-width="110px">
+            <el-form-item label="目标数据源" required>
+              <el-select v-model="form.targetId" filterable placeholder="数据搬到哪个库去?" style="width:100%"
+                @change="probeTargetTable">
+                <el-option v-for="d in datasources" :key="d.id" :value="d.id" :disabled="d.id === form.sourceId"
+                  :label="d.datasourceName + '  (' + d.host + ':' + d.port + '/' + d.dbName + ')'" />
+              </el-select>
+              <div class="wiz-tip">这里不会列出源数据源 —— 同库同名等于原地同步, 没有意义。</div>
+            </el-form-item>
+            <el-form-item label="目标表名">
+              <el-input :value="form.tableName || '(先回上一步选表)'" readonly>
+                <template slot="append">{{ targetDsLabel }}</template>
+              </el-input>
+              <div class="wiz-tip">与源表同名, 暂不支持改成其它名字。</div>
+            </el-form-item>
+            <el-alert v-if="tgtProbing" type="info" :closable="false" show-icon title="正在检查目标库表是否存在..." />
+            <el-alert v-else-if="tgtProbe && tgtProbe.ok" type="success" :closable="false" show-icon
+              :title="'目标库已存在表 ' + form.tableName + ' (' + tgtProbe.cols + ' 个字段), 可以继续'" />
+            <el-alert v-else-if="tgtProbe && !tgtProbe.ok" type="warning" :closable="false" show-icon
+              title="目标库还没有这张表"
+              description="可以先新建一个「同步表结构」任务把表建过去; 全量同步写入时若目标表缺失也可能直接报错。" />
+          </el-form>
+        </div>
+
+        <!-- ========== Step 3 选模式 ========== -->
+        <div v-show="wizStep === 2">
+          <el-form label-width="110px">
+            <el-form-item label="任务名称">
+              <el-input v-model="form.taskName" placeholder="给任务起个名字, 便于日后查找" />
+            </el-form-item>
+            <el-form-item label="同步方式" required>
+              <div class="wiz-types">
+                <div v-for="t in wizTypes" :key="t.value" class="wiz-type"
+                  :class="{ 'is-active': form.taskType === t.value }" @click="pickTaskType(t.value)">
+                  <div class="wt-title">{{ t.title }}</div>
+                  <div class="wt-desc">{{ t.desc }}</div>
+                </div>
+              </div>
+            </el-form-item>
+
+            <!-- 全量: 追数方式 -->
+            <el-form-item v-if="form.taskType === 'FULL'" label="追数方式">
+              <el-radio-group v-model="form.syncMode">
+                <el-radio-button label="ID">按主键 ID</el-radio-button>
+                <el-radio-button label="TIME">按更新时间</el-radio-button>
+              </el-radio-group>
+              <div class="wiz-tip">
+                {{ form.syncMode === 'ID'
+                  ? '按主键从小到大分批读, 一张表有多行就多用几次; 推荐, 速度最快'
+                  : '按更新时间分批读, 只搬这段时间之后改动过的数据' }}
+              </div>
+            </el-form-item>
+            <el-form-item v-if="form.taskType === 'FULL' && form.syncMode === 'TIME'" label="时间字段">
+              <el-input v-model="form.timeField" placeholder="默认 update_time" style="width:240px" />
+            </el-form-item>
+
+            <!-- 增量: Canal 连接 -->
+            <template v-if="form.taskType === 'INCR'">
+              <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+                title="增量同步需要 Canal"
+                description="源库要开启 binlog ROW 模式, 并部署 Canal Server 指向它; 没准备好就先选「全量同步」。" />
+              <el-form-item label="Canal 地址">
+                <el-input v-model="form.canalHost" placeholder="如 127.0.0.1" style="width:240px" />
+                <span class="wiz-inline-label">端口</span>
+                <el-input-number v-model="form.canalPort" :min="1" :max="65535" size="small" />
+              </el-form-item>
+              <el-form-item label="Destination">
+                <el-input v-model="form.canalDestination" placeholder="Canal 的 instance 名, 如 example" style="width:240px" />
+              </el-form-item>
+              <el-form-item label="同步哪些操作">
+                <el-checkbox-group v-model="dmlTypes">
+                  <el-checkbox label="INSERT">新增</el-checkbox>
+                  <el-checkbox label="UPDATE">更新</el-checkbox>
+                  <el-checkbox label="DELETE">删除</el-checkbox>
+                </el-checkbox-group>
+                <div class="wiz-tip">全不勾或全勾 = 不过滤; 例如归档库可以只勾「新增」。</div>
+              </el-form-item>
+            </template>
+
+            <el-alert v-if="form.taskType === 'DDL'" type="warning" :closable="false" show-icon
+              title="表结构同步只负责在目标库建表, 不搬任何数据。" />
+
+            <el-form-item label="什么时候跑" required>
+              <el-radio-group v-model="form.triggerType">
+                <el-radio-button label="MANUAL">我点按钮才跑</el-radio-button>
+                <el-radio-button label="CRON">定时自动跑</el-radio-button>
+                <el-radio-button label="EVENT">外部系统通知</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item v-if="form.triggerType === 'CRON'" label="执行频率" required>
+              <el-select v-model="form.cronExpr" placeholder="请选择执行频率" style="width:280px">
+                <el-option v-for="c in cronSelectOptions" :key="c.value" :value="c.value" :label="c.label" />
+              </el-select>
+              <el-button size="small" icon="el-icon-setting" style="margin-left:8px" @click="wizCronPickerVisible = true">高级</el-button>
+              <div class="wiz-tip">保存后调度立即生效, 到点自动执行; 任务还在跑时会跳过本次。</div>
+            </el-form-item>
+            <el-form-item v-else-if="form.triggerType === 'EVENT'" label="说明">
+              <div class="wiz-tip" style="margin-top:0">
+                保存后会生成一条专属网址, 外部系统对它发一次 POST 请求即可触发任务 (编辑任务页面可看到网址)。
+              </div>
+            </el-form-item>
+
+            <!-- 高级参数: 默认收起, 新手用不上就看不见 -->
+            <el-collapse class="wiz-advanced">
+              <el-collapse-item name="adv">
+                <template slot="title">
+                  <span class="wiz-adv-title">高级设置 (批次 / 分片 / 告警, 一般不用改)</span>
+                </template>
+                <el-form-item label="批次大小">
+                  <el-input-number v-model="form.batchSize" :min="100" :max="100000" size="small" />
+                  <span class="wiz-tip inline">一次搬多少行, 默认 1000</span>
+                </el-form-item>
+                <el-form-item v-if="form.taskType === 'FULL' && form.syncMode === 'ID'" label="并行分片数">
+                  <el-input-number v-model="form.shardCount" :min="1" :max="16" size="small" />
+                  <span class="wiz-tip inline">大表(百万行以上)可调到 4~8 提速</span>
+                </el-form-item>
+                <el-form-item v-if="form.taskType === 'FULL'" label="覆盖数据">
+                  <el-switch v-model="form.overwriteFlag" :active-value="1" :inactive-value="0" />
+                  <span class="wiz-tip inline">开启后每次启动先清空目标表再写入 —— 注意会丢目标表现有数据</span>
+                </el-form-item>
+                <el-form-item v-if="form.taskType !== 'DDL'" label="校验忽略字段">
+                  <el-input v-model="form.ignoreFields" placeholder="逗号分隔, 如 update_time,update_by" style="width:320px" />
+                </el-form-item>
+                <el-form-item label="钉钉告警">
+                  <el-input v-model="form.dingtalkWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx" />
+                </el-form-item>
+                <el-form-item label="邮件告警">
+                  <el-input v-model="form.alertEmail" placeholder="多个邮箱用英文逗号分隔" />
+                </el-form-item>
+              </el-collapse-item>
+            </el-collapse>
+          </el-form>
+        </div>
+
+        <!-- ========== Step 4 字段映射 ========== -->
+        <div v-show="wizStep === 3">
+          <div class="fm-toolbar">
+            <el-button size="mini" icon="el-icon-refresh" :loading="fmLoading" @click="reloadMapping">刷新列</el-button>
+            <el-button size="mini" type="primary" icon="el-icon-connection" @click="autoMatchFields"
+              :disabled="!sourceFields.length || !targetFields.length">自动配对同名字段</el-button>
+            <el-button size="mini" type="warning" icon="el-icon-delete" :disabled="!mappings.length"
+              @click="clearMappings">清空映射</el-button>
+            <span class="fm-stat">
+              已配对 <b class="ok">{{ mappings.length }}</b> 对 / 源 {{ sourceFields.length }} 字段 / 目标 {{ targetFields.length }} 字段
+            </span>
+          </div>
+
+          <div class="fm-stage" ref="wizStage" v-loading="fmLoading">
+            <!-- 左: 源字段 -->
+            <div class="fm-col fm-col-src">
+              <div class="fm-col-head">源字段 ({{ sourceDsLabel }} · {{ form.tableName || '-' }})</div>
+              <div class="fm-col-body">
+                <div v-if="!sourceFields.length" class="fm-empty">无字段, 请回到第 1 步确认源库与表名</div>
+                <div v-for="f in sourceFields" :key="'ws-' + f.name"
+                     class="fm-item fm-item-src"
+                     :class="{ 'fm-item-dim': isSrcMapped(f.name), 'fm-item-picking': drag.active && drag.srcName === f.name }"
+                     :data-name="f.name"
+                     @mousedown="onSrcMouseDown($event, f)">
+                  <span class="fm-item-name">{{ f.name }}</span>
+                  <span class="fm-item-type">{{ f.type }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- 中: SVG 连线层 -->
+            <svg class="fm-svg" :viewBox="'0 0 ' + fmSize.w + ' ' + fmSize.h" preserveAspectRatio="none">
+              <g v-for="(m, i) in mappings" :key="'wm-' + i + '-' + m.sourceField + '-' + m.targetField"
+                 class="fm-line" v-show="m.path">
+                <path :d="m.path" class="fm-line-path" />
+                <circle :cx="m.sx" :cy="m.sy" r="3.5" class="fm-line-dot" />
+                <circle :cx="m.tx" :cy="m.ty" r="3.5" class="fm-line-dot" />
+                <circle :cx="midX(m)" :cy="midY(m)" r="9" class="fm-line-close-bg" @click="removeMapping(i)" />
+                <text :x="midX(m)" :y="midY(m) + 4" text-anchor="middle" class="fm-line-close-x"
+                      @click="removeMapping(i)">×</text>
+              </g>
+              <g v-if="drag.active">
+                <path :d="drag.path" class="fm-line-drag" />
+                <circle :cx="drag.startX" :cy="drag.startY" r="4" class="fm-line-dot drag" />
+                <circle :cx="drag.curX" :cy="drag.curY" r="4" class="fm-line-dot drag" />
+              </g>
+            </svg>
+
+            <!-- 右: 目标字段 -->
+            <div class="fm-col fm-col-tgt">
+              <div class="fm-col-head">目标字段 ({{ targetDsLabel }} · {{ form.tableName || '-' }})</div>
+              <div class="fm-col-body">
+                <div v-if="!targetFields.length" class="fm-empty">目标库还没有该表的字段, 请先建表</div>
+                <div v-for="f in targetFields" :key="'wt-' + f.name"
+                     class="fm-item fm-item-tgt"
+                     :class="{ 'fm-item-dim': isTgtMapped(f.name), 'fm-item-drop': drag.active && drag.hoverName === f.name }"
+                     :data-name="f.name">
+                  <span class="fm-item-name">{{ f.name }}</span>
+                  <span class="fm-item-type">{{ f.type }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="fm-hint-row">
+            <i class="el-icon-info" /> 按住左侧源字段拖到右侧目标字段即可连线; 连线上的 × 可删除; 一根线都不连 = 按同名同步全部字段。
+          </div>
+          <el-alert :type="mappings.length ? 'success' : 'info'" :closable="false" show-icon style="margin-top:10px"
+            :title="mappings.length
+              ? '将只同步已连线的 ' + mappings.length + ' 个字段, 其余字段不会同步'
+              : '未连线: 按字段名同名的方式同步全部字段 (大多数场景这样就够了)'" />
+        </div>
+      </div>
+
+      <div slot="footer">
+        <el-button @click="wizard = false">取消</el-button>
+        <el-button v-show="wizStep > 0" @click="wizPrev">上一步</el-button>
+        <el-button v-if="wizStep < 3" type="primary" @click="wizNext">下一步</el-button>
+        <el-button v-else type="primary" :loading="wizSaving" @click="wizFinish">完成创建</el-button>
+      </div>
+    </el-dialog>
+
+    <!-- Cron 表达式可视化生成器: 向导专用实例 (与编辑弹窗内的那个各自独立, 避免互相抢 visible) -->
+    <cron-picker :visible.sync="wizCronPickerVisible" v-model="form.cronExpr" />
+
     <!-- 日志弹窗 -->
     <el-dialog :title="'任务日志 [ID=' + taskLogId + ']'" :visible.sync="logDialog" width="900px" @open="loadLogs">
       <el-table :data="logPage.rows" v-loading="logLoading" border max-height="500">
@@ -609,7 +875,26 @@ export default {
       // binlog DML 类型过滤 (勾选数组, 提交时拼成逗号串 binlogDmlTypes; 空 = 全部同步)
       dmlTypes: ['INSERT', 'UPDATE', 'DELETE'],
       // Cron 表达式可视化生成器弹窗
+      // 编辑弹窗与向导各用一个实例: 同一个 visible 变量会被两个 picker 同时响应, 导致弹两遍
       cronPickerVisible: false,
+      wizCronPickerVisible: false,
+
+      /* ============ 新建任务向导 (4 步) ============ */
+      wizard: false,
+      wizStep: 0,          // 0=选源 1=选目标 2=选模式 3=字段映射
+      wizSaving: false,
+      // 目标库同名表探测结果: null=没探测, { ok:true, cols } / { ok:false }
+      tgtProbe: null,
+      tgtProbing: false,
+      // 源库表探测结果 (第 1 步用): 目标还没选时也要能告诉用户"这张表读到了没"
+      srcProbe: null,
+      srcProbing: false,
+      // 步骤 3 的三选一说明卡
+      wizTypes: [
+        { value: 'FULL', title: '全量同步', desc: '把整张表搬一遍, 可重复执行; 第一次迁移选这个' },
+        { value: 'INCR', title: '增量同步', desc: '源库一有增删改就跟着同步, 需要 Canal' },
+        { value: 'DDL',  title: '同步表结构', desc: '只在目标库建一张同样的表, 不搬数据' }
+      ],
       // CRON 调度预设频率 (只允许选择, 不再手填; 秒 分 时 日 月 周)
       cronOptions: [
         // 常用快捷频率; 更灵活的组合用「高级配置」可视化生成
@@ -705,6 +990,8 @@ export default {
       return this.cronOptions
     },
     /* 事件触发回调地址: 开发环境走 /dev-api 代理, 生产环境直连当前域名 */
+    sourceDsLabel () { return this.dsLabel(this.form && this.form.sourceId) },
+    targetDsLabel () { return this.dsLabel(this.form && this.form.targetId) },
     eventTriggerUrl () {
       if (!this.form || !this.form.eventToken) return ''
       const base = process.env.NODE_ENV === 'production' ? window.location.origin : window.location.origin + '/dev-api'
@@ -753,16 +1040,28 @@ export default {
     'form.sourceId' () {
       this.fetchTables()
       this.fetchColumns()
+      // 向导第 1 步: 选完库/表立刻告诉用户这张表读不读得到
+      if (this.wizard && this.wizStep === 0) this.probeSourceTable()
     },
     'form.targetId' () {
       this.fetchColumns()
     },
     'form.tableName' () {
       this.fetchColumns()
+      if (this.wizard && this.wizStep === 0) this.probeSourceTable()
     },
     // 切到字段映射 tab 时: pane 刚渲染/弹窗尺寸刚稳定, 兜底重算一次连线
     tabActive (val) {
       if (val === 'mapping') this.initMappingStage()
+    },
+    // 向导走到第 4 步(字段映射): 此时舞台才第一次渲染, 补拉一次列并重算连线
+    wizStep (val) {
+      if (val === 3) {
+        this.$nextTick(() => {
+          if (!this.sourceFields.length || !this.targetFields.length) this.fetchColumns()
+          this.initMappingStage()
+        })
+      }
     }
   },
   mounted () {
@@ -967,6 +1266,182 @@ export default {
         .catch(() => {})
     },
 
+    /* ==================== 新建任务向导 (4 步) ==================== */
+
+    dsLabel (id) {
+      const d = (this.datasources || []).find(x => x.id === id)
+      return d ? d.datasourceName : '-'
+    },
+    /** 打开向导: form 一次性写全, 保证 Vue 2 能追踪到每个字段 */
+    openWizard () {
+      this.form = {
+        taskType: 'FULL', syncMode: 'ID', triggerType: 'MANUAL',
+        taskName: '', sourceId: '', targetId: '', tableName: '',
+        idField: 'id', timeField: 'update_time',
+        batchSize: 1000, shardCount: 1, overwriteFlag: 0, ignoreFields: '',
+        canalHost: '', canalPort: 11111, canalDestination: '',
+        dingtalkWebhook: '', alertEmail: '', cronExpr: '', eventToken: ''
+      }
+      this.dmlTypes = ['INSERT', 'UPDATE', 'DELETE']
+      this.mappings = []; this.sourceFields = []; this.targetFields = []; this.originalMappings = []
+      this.sourceTables = []
+      this.tgtProbe = null; this.tgtProbing = false
+      this.srcProbe = null; this.srcProbing = false
+      this.wizStep = 0
+      this.wizard = true
+    },
+    onWizardClosed () {
+      this.wizStep = 0
+      this.wizSaving = false
+      this.tgtProbe = null; this.tgtProbing = false
+      this.srcProbe = null; this.srcProbing = false
+      this.wizCronPickerVisible = false
+      // 复用编辑那套清理: 表单一并重置, 避免下次打开编辑弹窗带着向导里没保存的值
+      this.onDialogClosed()
+    },
+    /** 选择同步方式: 同步模式随之切换 (INCR/DDL 没有"按主键/按时间"之分) */
+    pickTaskType (type) {
+      this.form.taskType = type
+      this.form.syncMode = type === 'FULL' ? (this.form.syncMode === 'TIME' ? 'TIME' : 'ID')
+                                           : (type === 'INCR' ? 'BINLOG' : 'DDL')
+      // 类型变了, 旧的映射不再适用
+      if (this.mappings.length) { this.mappings = []; this.rebuildMappingPaths() }
+    },
+    /**
+     * 读一张表的字段列表, 成功返回列数; 用于向导的"这张表到底能不能读到"即时反馈。
+     * 失败返回 null —— 不弹错: 探测只是提示, 报错交给下一步提示条。
+     */
+    async probeTable (dsId, table) {
+      try {
+        const r = await listColumns(dsId, table)
+        const cols = r.data || []
+        return cols.length ? cols.length : null
+      } catch (e) {
+        return null
+      }
+    },
+    /** 第 1 步: 源表读到了就给个绿条, 读不到立刻告诉用户, 不让他带着错误配置往下走 */
+    async probeSourceTable () {
+      if (!this.form.sourceId || !this.form.tableName) { this.srcProbe = null; return }
+      this.srcProbing = true
+      const cols = await this.probeTable(this.form.sourceId, this.form.tableName)
+      this.srcProbe = cols ? { ok: true, cols } : { ok: false }
+      this.srcProbing = false
+    },
+    /** 探测目标库是否有同名表 —— 有=可直接同步, 没有=提示先建表, 避免"启动才发现报错" */
+    async probeTargetTable () {
+      this.tgtProbe = null
+      if (!this.form.targetId || !this.form.tableName) return
+      this.tgtProbing = true
+      const cols = await this.probeTable(this.form.targetId, this.form.tableName)
+      this.tgtProbe = cols ? { ok: true, cols } : { ok: false }
+      this.tgtProbing = false
+    },
+    /** 一键把两边同名的字段连起来 (小客户最常见的诉求就是"都同名, 帮我连好") */
+    autoMatchFields () {
+      const tgtNames = new Set(this.targetFields.map(f => f.name))
+      const added = []
+      this.sourceFields.forEach(f => {
+        if (!tgtNames.has(f.name)) return
+        if (this.isSrcMapped(f.name) || this.isTgtMapped(f.name)) return
+        added.push({ sourceField: f.name, targetField: f.name, sortNo: this.mappings.length + added.length, path: '' })
+      })
+      if (!added.length) {
+        this.$message.info('没有可配对的新同名字段')
+        return
+      }
+      this.mappings = this.mappings.concat(added)
+      this.$nextTick(() => this.rebuildMappingPaths())
+      this.$message.success('已配对 ' + added.length + ' 组同名字段')
+    },
+    wizPrev () { if (this.wizStep > 0) this.wizStep-- },
+    /** 分步校验: 出错时把用户留在当前步并给出人话提示 */
+    wizValidateStep (step) {
+      const f = this.form
+      if (step === 0) {
+        if (!f.sourceId) return '请先选择源数据源'
+        if (!f.tableName) return '请选择或直接输入要同步的表名'
+        // 已经探测过且明确读不到: 直接拦下, 别让用户带着错误配置往下走
+        if (this.srcProbe && !this.srcProbe.ok) return '源库读不到表 ' + f.tableName + ', 请检查表名或数据源连接'
+        return ''
+      }
+      if (step === 1) {
+        if (!f.targetId) return '请选择目标数据源'
+        if (f.targetId === f.sourceId) return '源和目标不能是同一个数据源 (表名相同, 等于原地同步)'
+        return ''
+      }
+      if (step === 2) {
+        if (!f.taskType) return '请选择同步方式'
+        if (f.taskType === 'FULL' && !['ID', 'TIME'].includes(f.syncMode)) return '请选择追数方式'
+        if (f.taskType === 'INCR') {
+          if (!f.canalHost) return '请填写 Canal 地址'
+          if (!f.canalPort) return '请填写 Canal 端口'
+          if (!f.canalDestination) return '请填写 Canal Destination (instance 名)'
+        }
+        if (f.triggerType === 'CRON' && !f.cronExpr) return '定时调度请选择执行频率'
+        return ''
+      }
+      return ''
+    },
+    wizNext () {
+      const err = this.wizValidateStep(this.wizStep)
+      if (err) { this.$message.warning(err); return }
+      if (this.wizStep === 0 && !this.sourceTables.length) this.fetchTables()
+      // 进第 2 步时目标可能已选过(从表单残留), 补一次探测
+      if (this.wizStep === 1) this.probeTargetTable()
+      // 任务名留空给个默认值: 小客户常常懒得填
+      if (this.wizStep === 1 && !this.form.taskName) {
+        this.form.taskName = (this.form.tableName || '任务') + '同步'
+      }
+      if (this.wizStep < 3) this.wizStep++
+    },
+    wizFinish () {
+      // 兜底再校验一遍前三步, 防止用户回退改坏了配置
+      for (let s = 0; s <= 2; s++) {
+        const err = this.wizValidateStep(s)
+        if (err) { this.$message.warning('第 ' + (s + 1) + ' 步: ' + err); this.wizStep = s; return }
+      }
+      // 目标表还不存在: 启动大概率会报 "Table doesn't exist", 这里再问一句, 不让用户白建一个跑不起来的任务
+      if (this.tgtProbe && !this.tgtProbe.ok) {
+        this.$confirm('目标库还没有表 ' + this.form.tableName + ', 直接同步会报「表不存在」。仍要创建吗?(可以先建一个「同步表结构」任务)', '提示', { type: 'warning' })
+          .then(() => this.doCreateTask())
+          .catch(() => {})
+        return
+      }
+      this.doCreateTask()
+    },
+    doCreateTask () {
+      this.prepareFormForSubmit()
+      this.wizSaving = true
+      addTask(this.form).then(r => {
+        const newId = r && r.data
+        return Promise.resolve(newId).then(id => {
+          if (!id) return null
+          const payload = this.mappings.map((m, i) => ({
+            taskId: id, sourceField: m.sourceField, targetField: m.targetField, sortNo: i
+          }))
+          return payload.length
+            ? saveFieldMapping(id, payload).then(() => id).catch(() => {
+                this.$message.warning('任务已创建, 但字段映射保存失败, 可在编辑里重新配置')
+                return id
+              })
+            : id
+        })
+      }).then(id => {
+        this.$message.success('任务创建成功')
+        this.wizard = false
+        this.load()
+        if (!id) return
+        // 创建完顺手问一句要不要跑: 新手常常不知道下一步要做什么
+        this.$confirm('任务已创建, 是否立即启动同步?', '创建完成', {
+          confirmButtonText: '立即启动', cancelButtonText: '稍后再说', type: 'success'
+        }).then(() => { startTask(id).then(() => { this.$message.success('已启动'); this.load() }).catch(() => {}) })
+          .catch(() => {})
+      }).catch(err => {
+        this.$message.error('创建失败:' + (err.msg || err.message || '未知错误'))
+      }).finally(() => { this.wizSaving = false })
+    },
+
     onAdd (type) {
       // DDL 类型不需要 batchSize / idField / timeField, syncMode 填 'DDL' 占位即可
       const base = { taskType: type, syncMode: type === 'FULL' ? 'ID' : (type === 'DDL' ? 'DDL' : 'BINLOG'), idField: 'id', timeField: 'update_time', overwriteFlag: 0, shardCount: 1, triggerType: 'MANUAL' }
@@ -1022,19 +1497,26 @@ export default {
       // 切换任务类型后清空 mapping (老 mapping 不再适用)
       this.mappings = []; this.sourceFields = []; this.targetFields = []
     },
+    /**
+     * 提交前的字段规整 (编辑保存 / 向导完成共用):
+     * DDL 用不到批次大小但后端字段非空, 给个占位; binlog DML 勾选数组拼逗号串落库。
+     */
+    prepareFormForSubmit () {
+      // DDL 类型不需要 batchSize, 若没填则用 100 占位 (后端不依赖该值)
+      if (this.form.taskType === 'DDL' && !this.form.batchSize) this.form.batchSize = 100
+      // binlog DML 过滤: 勾选数组拼成逗号串 (全勾/全不勾 = null, 即不过滤)
+      if (this.form.taskType === 'INCR') {
+        const all = ['INSERT', 'UPDATE', 'DELETE']
+        const picked = (this.dmlTypes || []).filter(t => all.includes(t))
+        this.form.binlogDmlTypes = (picked.length === 0 || picked.length === all.length) ? null : picked.join(',')
+      } else {
+        this.form.binlogDmlTypes = null
+      }
+    },
     async onSave () {
       this.$refs.form.validate(ok => {
         if (!ok) { this.tabActive = 'base'; return }
-        // DDL 类型不需要 batchSize, 若没填则用 100 占位 (后端不依赖该值)
-        if (this.form.taskType === 'DDL' && !this.form.batchSize) this.form.batchSize = 100
-        // binlog DML 过滤: 勾选数组拼成逗号串 (全勾/全不勾 = null, 即不过滤)
-        if (this.form.taskType === 'INCR') {
-          const all = ['INSERT', 'UPDATE', 'DELETE']
-          const picked = (this.dmlTypes || []).filter(t => all.includes(t))
-          this.form.binlogDmlTypes = (picked.length === 0 || picked.length === all.length) ? null : picked.join(',')
-        } else {
-          this.form.binlogDmlTypes = null
-        }
+        this.prepareFormForSubmit()
         this.saving = true
         const api = this.form.id ? updateTask : addTask
         api(this.form).then(r => {
@@ -1360,13 +1842,22 @@ export default {
     isTgtMapped (n) { return this.mappings.some(m => m.targetField === n) },
 
     /**
+     * 当前生效的字段映射舞台 DOM: 编辑弹窗里的 fmStage 与向导里的 wizStage 是两套相同结构的 DOM,
+     * 锚点坐标必须基于「自己所在的那个舞台」计算, 取错就会连到看不见的位置。
+     */
+    stageEl () {
+      const wiz = this.wizard ? this.$refs.wizStage : null
+      const dlg = this.dialog ? this.$refs.fmStage : null
+      return wiz || dlg || null
+    },
+    /**
      * 初始化连线层: 记录 stage 像素尺寸 (SVG viewBox 与 DOM 1:1, 避免百分比换算错位),
      * 并给两栏列表挂滚动监听 (滚动会改变锚点位置, 需重算连线)
      */
     initMappingStage () {
       this.$nextTick(() => {
-        const stage = this.$refs.fmStage
-        if (!stage || !this.dialog) return
+        const stage = this.stageEl()
+        if (!stage) return
         const r = stage.getBoundingClientRect()
         if (r.width > 0 && r.height > 0) this.fmSize = { w: r.width, h: r.height }
         stage.querySelectorAll('.fm-col-body').forEach(body => {
@@ -1378,12 +1869,15 @@ export default {
     },
     onColScroll () { this.rebuildMappingPaths() },
     onWinResize () {
-      if (this.dialog && this.tabActive === 'mapping') this.initMappingStage()
+      // 编辑弹窗停在映射 tab、或向导停在字段映射步时, 窗口变化要重算连线
+      if ((this.dialog && this.tabActive === 'mapping') || (this.wizard && this.wizStep === 3)) {
+        this.initMappingStage()
+      }
     },
 
     /** 某字段行边缘中点相对 stage 的像素坐标 */
     anchorOf (el, side) {
-      const stage = this.$refs.fmStage
+      const stage = this.stageEl()
       if (!stage || !el) return null
       const s = stage.getBoundingClientRect()
       const e = el.getBoundingClientRect()
@@ -1393,12 +1887,12 @@ export default {
       }
     },
     srcAnchor (name) {
-      const stage = this.$refs.fmStage
+      const stage = this.stageEl()
       if (!stage) return null
       return this.anchorOf(stage.querySelector('.fm-item-src[data-name="' + cssEscape(name) + '"]'), 'right')
     },
     tgtAnchor (name) {
-      const stage = this.$refs.fmStage
+      const stage = this.stageEl()
       if (!stage) return null
       return this.anchorOf(stage.querySelector('.fm-item-tgt[data-name="' + cssEscape(name) + '"]'), 'left')
     },
@@ -1430,7 +1924,7 @@ export default {
      * 不依赖元素自身的 mouseup —— 鼠标快速划过/SVG 覆盖层遮挡都不会丢事件
      */
     hitTestTarget (clientX, clientY) {
-      const stage = this.$refs.fmStage
+      const stage = this.stageEl()
       if (!stage) return ''
       const els = stage.querySelectorAll('.fm-item-tgt')
       for (let i = 0; i < els.length; i++) {
@@ -1456,7 +1950,7 @@ export default {
     },
     onDocMouseMove (ev) {
       if (!this.drag.active) return
-      const stage = this.$refs.fmStage
+      const stage = this.stageEl()
       if (!stage) return
       const sRect = stage.getBoundingClientRect()
       const x = ev.clientX - sRect.left
@@ -1503,7 +1997,9 @@ function cssEscape (s) {
   font-size: 12px;
 }
 /* 低频动作已收进「更多」下拉, 这列不再需要平铺撑满, 改成左对齐; 间距统一交给 gap
-   overflow-x: 溢出兜底 —— 极端窄屏下按钮完整但单元格内可横滑, 不会再被裁掉 */
+   注意: 这里刻意不设 overflow-x —— 列宽已给足(min-width=420), 按钮排得下就无需兜底;
+   一旦加了 overflow-x: auto, 窄屏时单元格内会出现一根横向滚动条, 反而挤占行高、观感很差。
+   极端窄屏由 el-table 整体横向滚动承接, 而不是让每个单元格各自滚 */
 .sync-task-table >>> td:last-child .cell {
   display: flex;
   flex-wrap: nowrap;
@@ -1513,7 +2009,6 @@ function cssEscape (s) {
   white-space: nowrap;
   padding-left: 8px;
   padding-right: 8px;
-  overflow-x: auto;
 }
 /* 按钮不参与压缩, 保证滚动条出现时按钮完整 */
 .sync-task-table >>> td:last-child .cell .el-button,
@@ -1526,6 +2021,27 @@ function cssEscape (s) {
 .sync-task-table >>> td:last-child .op-more { color: #606266; }
 /* 下拉里的危险动作 */
 .op-danger { color: #F56C6C; }
+
+/* ============ 新建任务向导 ============ */
+/* 固定最小高度: 四步内容高度差很大, 不锁住会导致点「下一步」时弹窗与按钮一起上下跳 */
+.wiz-body { min-height: 380px; max-height: 62vh; overflow-y: auto; padding-right: 4px }
+/* 每步一句人话提示, 放在控件正下方 */
+.wiz-tip { color: #909399; font-size: 12px; line-height: 18px; margin-top: 4px }
+.wiz-tip.inline { display: inline-block; margin-left: 10px; margin-top: 0 }
+.wiz-inline-label { margin: 0 8px 0 14px; color: #909399; font-size: 12px }
+/* 同步方式三选一: 用卡片代替单选框, 新手看得懂每个选项是干嘛的 */
+.wiz-types { display: flex; gap: 12px }
+.wiz-type {
+  flex: 1; border: 1px solid #DCDFE6; border-radius: 6px; padding: 12px 14px; cursor: pointer;
+  transition: border-color .15s, box-shadow .15s; background: #fff;
+}
+.wiz-type:hover { border-color: #C0C4CC }
+.wiz-type.is-active { border-color: #409EFF; box-shadow: 0 0 0 2px rgba(64,158,255,.12) }
+.wiz-type .wt-title { font-size: 14px; font-weight: 600; color: #303133; margin-bottom: 4px }
+.wiz-type .wt-desc { font-size: 12px; color: #909399; line-height: 18px }
+/* 高级设置默认收起, 标题弱化 —— 新手不需要看到这些专业参数 */
+.wiz-advanced { margin-top: 6px }
+.wiz-adv-title { color: #909399; font-size: 12px }
 
 /* ============ 导入任务弹窗 - 配置预览 ============ */
 .import-preview { margin-top: 14px }
