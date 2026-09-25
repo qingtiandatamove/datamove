@@ -29,4 +29,9 @@ public final class SyncType {
     public static final String LOG_SUCCESS = "SUCCESS";
     public static final String LOG_FAILED  = "FAILED";
     public static final String LOG_RUNNING = "RUNNING";
+
+    /** 调度方式 (三选一) */
+    public static final String TRIGGER_CRON   = "CRON";    // 定时调度 (cron 表达式)
+    public static final String TRIGGER_MANUAL = "MANUAL";  // 手动启动 (默认)
+    public static final String TRIGGER_EVENT  = "EVENT";   // 事件触发 (HTTP 回调)
 }

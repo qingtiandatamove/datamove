@@ -79,5 +79,14 @@ public class SyncTask extends BaseEntity implements Serializable {
     /** binlog DML 类型过滤: 逗号分隔 INSERT/UPDATE/DELETE 子集; 为空 = 全部同步 */
     private String binlogDmlTypes;
 
+    /** 调度方式(三选一): CRON=定时调度 MANUAL=手动启动 EVENT=事件触发 */
+    private String triggerType;
+
+    /** CRON 表达式 (Spring 6 位: 秒 分 时 日 月 周), triggerType=CRON 时必填 */
+    private String cronExpr;
+
+    /** 事件触发令牌 (作为 URL 密钥), triggerType=EVENT 时自动生成, 可手动指定便于迁移 */
+    private String eventToken;
+
     private String delFlag;
 }

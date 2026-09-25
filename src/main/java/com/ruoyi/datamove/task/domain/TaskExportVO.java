@@ -45,6 +45,10 @@ public class TaskExportVO implements Serializable {
     private String canalDestination;
     private String binlogDmlTypes;
 
+    /* 调度方式: 导出 triggerType/cronExpr 便于跨环境迁移; eventToken 是密钥, 不随文件导出, 导入时重新生成 */
+    private String triggerType;
+    private String cronExpr;
+
     /* ---------- 数据源引用: 跨环境按名称重映射, 不导出 Long 型 ID ---------- */
 
     /** 源数据源名称 (目标环境必须存在同名数据源, 否则导入报错) */

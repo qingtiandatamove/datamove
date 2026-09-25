@@ -75,7 +75,9 @@ public class SecurityConfig {
                         "/doc.html",
                         "/webjars/**",
                         "/druid/**",
-                        "/error"
+                        "/error",
+                        // 事件触发回调: 外部系统带令牌调用, 令牌本身即凭证, 免 JWT
+                        "/sync/task/event/**"
                 ).permitAll()
                 .anyRequest().authenticated()
             .and()

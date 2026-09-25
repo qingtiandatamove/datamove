@@ -26,6 +26,7 @@ import com.ruoyi.datamove.task.mapper.SyncTaskProgressMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskRunMapper;
 import com.ruoyi.datamove.task.service.ISyncTaskFieldMappingService;
 import com.ruoyi.datamove.task.service.ISyncTaskService;
+import com.ruoyi.datamove.task.service.TaskTriggerScheduler;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
@@ -56,6 +57,7 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
     private final TaskMetricsRegistry             metricsRegistry;
     private final AuditLogService                 auditLogService;
     private final ISyncTaskFieldMappingService    fieldMappingService;
+    private final TaskTriggerScheduler            triggerScheduler;
 
     @Override
     public PageResult<SyncTask> page(String keyword, String taskType, String status,
@@ -103,8 +105,12 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (exists > 0) throw new RuntimeException("任务名称已存在: " + t.getTaskName());
         // binlog DML 类型过滤: 归一化为大写逗号串 (非法 token 丢弃, 全非法 = null 不过滤)
         t.setBinlogDmlTypes(normalizeBinlogDmlTypes(t.getBinlogDmlTypes()));
+        // 调度方式: 校验 + 归一化 (CRON 必须带合法表达式, EVENT 自动生成触发令牌)
+        normalizeTrigger(t);
         t.setStatus(SyncType.STATUS_STOP);
         taskMapper.insert(t);
+        // CRON 任务: 入库后立即注册调度
+        triggerScheduler.register(t);
         // 初始化进度
         SyncTaskProgress p = new SyncTaskProgress();
         p.setTaskId(t.getId());
@@ -164,10 +170,19 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setCanalDestination(t.getCanalDestination());
         // binlog DML 类型过滤: 归一化为大写逗号串 (非法 token 丢弃, 全非法 = null 不过滤)
         db.setBinlogDmlTypes(normalizeBinlogDmlTypes(t.getBinlogDmlTypes()));
+        // 调度方式: 先赋新值 (eventToken 前端不回传时保留旧值, 避免每次保存都换令牌), 再校验归一化
+        db.setTriggerType(t.getTriggerType());
+        db.setCronExpr(t.getCronExpr());
+        if (t.getEventToken() != null && !t.getEventToken().trim().isEmpty()) {
+            db.setEventToken(t.getEventToken().trim());
+        }
+        normalizeTrigger(db);
         db.setRemark(t.getRemark());
         // 审计: 记录本次修改, 同一个请求的所有字段变更共享 revision_id
         auditLogService.recordTaskUpdate(snapshot, db);
         taskMapper.updateById(db);
+        // 调度方式/表达式可能变了: 按最新配置刷新 (非 CRON 等价于注销)
+        triggerScheduler.register(db);
     }
 
     @Override
@@ -197,6 +212,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         }
         db.setDelFlag("1");
         taskMapper.updateById(db);
+        // 删除任务: 注销定时调度
+        triggerScheduler.unregister(id);
         // 同步删除日志、断点进度与运行历史
         logMapper.delete(new QueryWrapper<SyncTaskLog>().eq("task_id", id));
         runMapper.delete(new QueryWrapper<SyncTaskRun>().eq("task_id", id));
@@ -238,6 +255,11 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         copy.setCanalPort(src.getCanalPort());
         copy.setCanalDestination(src.getCanalDestination());
         copy.setBinlogDmlTypes(src.getBinlogDmlTypes());
+        // 调度方式: 沿用 CRON 表达式 / 手动; EVENT 令牌不沿用 —— 令牌即密钥, 克隆体必须有自己的
+        copy.setTriggerType(src.getTriggerType());
+        copy.setCronExpr(src.getCronExpr());
+        copy.setEventToken(SyncType.TRIGGER_EVENT.equals(src.getTriggerType())
+                ? randomToken() : src.getEventToken());
 
         // 强制重置的字段 (运行态 / 启动位点)
         copy.setId(null);                                          // 主键重置 → 新增
@@ -269,6 +291,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
 
         // 3. 审计: 用 CREATE 事件记录, 但在备注里加了「克隆自任务#X」便于溯源
         auditLogService.recordTaskCreate(copy);
+        // CRON 任务: 克隆体同样注册调度
+        triggerScheduler.register(copy);
         log.info("[clone] 源任务 #{}({}) → 新任务 #{}, 字段映射 {} 条", src.getId(), src.getTaskName(), copy.getId(), mappings == null ? 0 : mappings.size());
         return copy.getId();
     }
@@ -302,6 +326,9 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         vo.setCanalPort(task.getCanalPort());
         vo.setCanalDestination(task.getCanalDestination());
         vo.setBinlogDmlTypes(task.getBinlogDmlTypes());
+        // 调度方式: 只导 CRON/手动配置; eventToken 是密钥不随文件走, 导入后重新生成
+        vo.setTriggerType(task.getTriggerType());
+        vo.setCronExpr(task.getCronExpr());
 
         // 数据源引用: 按名称导出 (跨环境 ID 不可沿用), 附 host/port/dbName 供人工核对
         vo.setSourceDatasourceRef(toRef(task.getSourceId()));
@@ -367,6 +394,9 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         t.setCanalPort(vo.getCanalPort());
         t.setCanalDestination(vo.getCanalDestination());
         t.setBinlogDmlTypes(normalizeBinlogDmlTypes(vo.getBinlogDmlTypes()));
+        // 调度方式: 沿用导出文件里的 CRON/MANUAL; EVENT 的令牌不迁移, 重新生成
+        t.setTriggerType(vo.getTriggerType() == null ? SyncType.TRIGGER_MANUAL : vo.getTriggerType());
+        t.setCronExpr(vo.getCronExpr());
         // 运行态全部重置: 导入的是配置, 不是进度
         t.setStartId(null);
         t.setStartTime(null);
@@ -377,8 +407,10 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         String oldRemark = vo.getRemark();
         t.setRemark("导入任务 (源环境数据源: " + vo.getSourceDatasourceName() + " → " + vo.getTargetDatasourceName() + ")"
                 + (oldRemark == null || oldRemark.isEmpty() ? "" : "\n" + oldRemark));
+        // 调度方式校验 + 令牌生成 (与 add() 一致; 导入文件的 CRON 表达式非法时直接报错, 不静默降级)
+        normalizeTrigger(t);
         insertWithUniqueName(t);
-
+        triggerScheduler.register(t);
         // 进度初始化 (与 add() 一致)
         SyncTaskProgress p = new SyncTaskProgress();
         p.setTaskId(t.getId());
@@ -505,6 +537,27 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
             cur = cur.getCause();
         }
         return false;
+    }
+
+    /**
+     * 事件触发启动: 外部系统 POST /sync/task/event/{token} 时进入。
+     * 令牌即密钥 —— 找不到/调度方式不符/运行中 都按错误返回, 不泄露任务存在性以外的信息。
+     */
+    @Override
+    public Long triggerByEvent(String token) {
+        if (token == null || token.trim().isEmpty()) throw new RuntimeException("事件触发令牌不能为空");
+        SyncTask task = taskMapper.selectOne(new QueryWrapper<SyncTask>()
+                .eq("event_token", token.trim()).eq("del_flag", "0"));
+        if (task == null) throw new RuntimeException("无效的事件触发令牌");
+        if (!SyncType.TRIGGER_EVENT.equals(task.getTriggerType())) {
+            throw new RuntimeException("任务「" + task.getTaskName() + "」的调度方式不是事件触发");
+        }
+        if (SyncType.STATUS_RUNNING.equals(task.getStatus()) || SyncType.STATUS_PAUSE.equals(task.getStatus())) {
+            throw new RuntimeException("任务「" + task.getTaskName() + "」正在运行(" + task.getStatus() + "), 本次触发忽略");
+        }
+        log.info("[trigger] 任务 #{}({}) 收到事件触发, 启动", task.getId(), task.getTaskName());
+        start(task.getId());
+        return task.getId();
     }
 
     @Override
@@ -845,6 +898,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         c.setCanalPort(src.getCanalPort());
         c.setCanalDestination(src.getCanalDestination());
         c.setBinlogDmlTypes(src.getBinlogDmlTypes());
+        c.setTriggerType(src.getTriggerType());
+        c.setCronExpr(src.getCronExpr());
         c.setRemark(src.getRemark());
         c.setStatus(src.getStatus());
         return c;
@@ -867,5 +922,52 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         }
         if (keep.isEmpty() || keep.size() == 3) return null;
         return String.join(",", keep);
+    }
+
+    /**
+     * 调度方式校验 + 归一化 (add/update/import 共用):
+     *   - 非法值/为空 → MANUAL (存量数据兼容)
+     *   - CRON → 必须带合法 Spring 6 位表达式, 否则直接拒绝
+     *   - EVENT → 令牌为空时自动生成; CRON/MANUAL 清掉无关注解配置避免脏数据
+     */
+    private static void normalizeTrigger(SyncTask t) {
+        String type = t.getTriggerType();
+        if (type == null || type.trim().isEmpty()) {
+            type = SyncType.TRIGGER_MANUAL;
+        }
+        type = type.trim().toUpperCase();
+        if (!SyncType.TRIGGER_CRON.equals(type)
+                && !SyncType.TRIGGER_MANUAL.equals(type)
+                && !SyncType.TRIGGER_EVENT.equals(type)) {
+            throw new RuntimeException("不支持的调度方式: " + t.getTriggerType() + " (可选 CRON / MANUAL / EVENT)");
+        }
+        t.setTriggerType(type);
+
+        if (SyncType.TRIGGER_CRON.equals(type)) {
+            String expr = t.getCronExpr() == null ? "" : t.getCronExpr().trim();
+            if (expr.isEmpty()) {
+                throw new RuntimeException("调度方式为「定时(CRON)」时必须填写 CRON 表达式");
+            }
+            if (!TaskTriggerScheduler.isValidCron(expr)) {
+                throw new RuntimeException("CRON 表达式非法: " + expr + " (需为 Spring 6 位格式: 秒 分 时 日 月 周, 如 0 0 2 * * *)");
+            }
+            t.setCronExpr(expr);
+            t.setEventToken(null);
+        } else if (SyncType.TRIGGER_EVENT.equals(type)) {
+            t.setCronExpr(null);
+            if (t.getEventToken() == null || t.getEventToken().trim().isEmpty()) {
+                t.setEventToken(randomToken());
+            } else {
+                t.setEventToken(t.getEventToken().trim());
+            }
+        } else {
+            t.setCronExpr(null);
+            t.setEventToken(null);
+        }
+    }
+
+    /** 生成事件触发令牌: 32 位 hex, 足够不可猜测 */
+    private static String randomToken() {
+        return java.util.UUID.randomUUID().toString().replace("-", "");
     }
 }

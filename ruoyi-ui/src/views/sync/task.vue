@@ -47,6 +47,16 @@
         <el-table-column prop="syncMode" label="模式" width="85">
           <template slot-scope="s">{{ modeName(s.row.syncMode) }}</template>
         </el-table-column>
+        <!-- 调度方式: 手动/定时/事件; CRON 悬浮显示表达式 -->
+        <el-table-column prop="triggerType" label="调度" width="80" align="center">
+          <template slot-scope="s">
+            <el-tooltip v-if="s.row.triggerType === 'CRON'" :content="'Cron: ' + (s.row.cronExpr || '')" placement="top">
+              <el-tag size="mini" type="warning">定时</el-tag>
+            </el-tooltip>
+            <el-tag v-else-if="s.row.triggerType === 'EVENT'" size="mini" type="success">事件</el-tag>
+            <span v-else>-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="overwriteFlag" label="覆盖" width="70" align="center">
           <template slot-scope="s">
             <el-tag v-if="s.row.taskType === 'FULL' && s.row.overwriteFlag === 1" size="mini" type="danger">覆盖</el-tag>
@@ -67,21 +77,26 @@
           <template slot-scope="s">{{ fmtTime(s.row.createTime) }}</template>
         </el-table-column>
         <!-- 操作列: 外面只留高频动作(状态动作/停止/数据校验), 低频与危险动作收进「更多」下拉, 不再平铺 9 个按钮
-             小屏适配: 不固定该列(固定列会压缩列宽裁掉按钮), 依赖表格整体横向滚动 (列总宽 > 容器时 el-table 自带整体滚动条) -->
-        <el-table-column label="操作" min-width="300">
+             小屏适配: 列宽必须完整容纳全部按钮(实测 5 个 mini 按钮约 340px) —— 溢出单元格的部分在 el-table
+             滚动区域(按列宽计算)之外, 滚到最右也看不到; min-width 给足 350 保证按钮永远可达 -->
+        <el-table-column label="操作" min-width="350">
           <template slot-scope="s">
             <!-- DDL 类型: 单次操作, 不支持暂停/继续/停止 -->
             <template v-if="s.row.taskType === 'DDL'">
               <el-button size="mini" type="success"
                 :disabled="s.row.status === 'RUNNING'"
                 @click="onStart(s.row)">
-                {{ s.row.status === 'COMPLETED' ? '再次同步' : (s.row.status === 'FAILED' ? '重试' : '同步表结构') }}
+                {{ s.row.triggerType === 'CRON' ? '立即执行' : (s.row.status === 'COMPLETED' ? '再次同步' : (s.row.status === 'FAILED' ? '重试' : '同步表结构')) }}
               </el-button>
             </template>
             <template v-else>
               <!-- 状态动作: 同一时刻只会出现一个 —— 运行中=暂停 / 已暂停=继续 / 其余=启动(文案随状态变化) -->
               <el-button v-if="s.row.status === 'RUNNING'" size="mini" @click="onPause(s.row)">暂停</el-button>
               <el-button v-else-if="s.row.status === 'PAUSE'" size="mini" type="warning" @click="onResume(s.row)">继续</el-button>
+              <!-- CRON 任务: 调度在保存时就已启用, 点这个按钮是「手动立即跑一次」, 文案必须与普通启动区分开, 避免误以为没到时间就调度执行了 -->
+              <el-tooltip v-else-if="s.row.triggerType === 'CRON'" content="定时调度保存后即已生效, 到点自动执行; 此按钮为手动立即执行一次" placement="top">
+                <el-button size="mini" type="success" plain @click="onStart(s.row)">立即执行</el-button>
+              </el-tooltip>
               <el-button v-else size="mini" type="success" @click="onStart(s.row)">
                 {{ s.row.status === 'COMPLETED' ? '重新启动' : (s.row.status === 'FAILED' ? '重试' : '启动') }}
               </el-button>
@@ -167,6 +182,39 @@
               <el-form-item label="同步模式"><el-tag type="warning">仅同步表结构 (DDL)</el-tag></el-form-item>
             </template>
 
+            <!-- 调度方式三选一: 手动 = 点启动才跑; CRON = 按表达式定时自动启动; EVENT = 外部系统 HTTP 回调触发 -->
+            <el-form-item label="调度方式" prop="triggerType">
+              <el-radio-group v-model="form.triggerType">
+                <el-radio-button label="MANUAL">手动</el-radio-button>
+                <el-radio-button label="CRON">定时(Cron)</el-radio-button>
+                <el-radio-button label="EVENT">事件触发</el-radio-button>
+              </el-radio-group>
+            </el-form-item>
+            <el-form-item v-if="form.triggerType === 'CRON'" label="执行频率" prop="cronExpr">
+              <el-select v-model="form.cronExpr" style="width:260px" placeholder="请选择执行频率">
+                <el-option v-for="c in cronSelectOptions" :key="c.value" :value="c.value" :label="c.label" />
+              </el-select>
+              <el-button size="small" icon="el-icon-setting" style="margin-left:8px" @click="cronPickerVisible = true">高级配置</el-button>
+              <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                <b>保存后调度即生效, 到点自动执行, 无需再点任何按钮。</b>任务运行中则跳过本次, 下个周期再触发。<br/>
+                列表里的「立即执行」是手动插队跑一次, 不影响定时调度; 需要更灵活的频率点「高级配置」可视化生成。
+              </div>
+            </el-form-item>
+            <el-form-item v-else-if="form.triggerType === 'EVENT'" label="触发地址">
+              <template v-if="form.eventToken">
+                <el-input :value="eventTriggerUrl" readonly style="width:100%">
+                  <el-button slot="append" icon="el-icon-document-copy" @click="copyEventUrl">复制</el-button>
+                </el-input>
+                <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                  外部系统向该地址发 POST 请求即可触发启动: <code>curl -X POST {{ eventTriggerUrl }}</code><br/>
+                  令牌即密钥, 请妥善保管; 任务运行中时触发会被忽略。
+                </div>
+              </template>
+              <div v-else style="color:#909399;font-size:12px;line-height:18px">
+                保存后自动生成触发地址与令牌, 再次编辑即可查看和复制。
+              </div>
+            </el-form-item>
+
             <el-form-item label="源数据源" prop="sourceId">
               <el-select v-model="form.sourceId" filterable style="width:100%">
                 <el-option v-for="d in datasources" :key="d.id" :value="d.id" :label="d.datasourceName + ' (' + d.host + ')'" />
@@ -247,6 +295,9 @@
             </el-form-item>
             <el-form-item label="备注"><el-input v-model="form.remark" type="textarea" :rows="2" /></el-form-item>
           </el-form>
+
+          <!-- Cron 表达式可视化生成器 (秒/分/时/天/月/周 分页签选择) -->
+          <cron-picker :visible.sync="cronPickerVisible" v-model="form.cronExpr" />
         </el-tab-pane>
 
         <!-- 字段映射: 仅 FULL / INCR 显示; DDL 不需要 -->
@@ -543,8 +594,10 @@ import { pageTask, detailTask, addTask, updateTask, deleteTask, cloneTask,
          startVerify, verifyDetail, latestVerify, verifyDiffs,
          repairVerify, stopVerify,
          exportTask, importTask } from '@/api/datamove'
+import CronPicker from '@/components/CronPicker/index.vue'
 
 export default {
+  components: { CronPicker },
   data () {
     return {
       query: { keyword: '', taskType: '', status: '', pageNum: 1, pageSize: 10, orderByColumn: 'id', isAsc: 'asc' },
@@ -555,6 +608,26 @@ export default {
       cloneHint: null,
       // binlog DML 类型过滤 (勾选数组, 提交时拼成逗号串 binlogDmlTypes; 空 = 全部同步)
       dmlTypes: ['INSERT', 'UPDATE', 'DELETE'],
+      // Cron 表达式可视化生成器弹窗
+      cronPickerVisible: false,
+      // CRON 调度预设频率 (只允许选择, 不再手填; 秒 分 时 日 月 周)
+      cronOptions: [
+        // 常用快捷频率; 更灵活的组合用「高级配置」可视化生成
+        { value: '0 */1 * * * ?', label: '每 1 分钟' },
+        { value: '0 */5 * * * ?', label: '每 5 分钟' },
+        { value: '0 */15 * * * ?', label: '每 15 分钟' },
+        { value: '0 */30 * * * ?', label: '每 30 分钟' },
+        { value: '0 0 * * * ?', label: '每 1 小时' },
+        { value: '0 0 */2 * * ?', label: '每 2 小时' },
+        { value: '0 0 */6 * * ?', label: '每 6 小时' },
+        { value: '0 0 */12 * * ?', label: '每 12 小时' },
+        { value: '0 0 0 * * ?', label: '每天 0 点' },
+        { value: '0 0 2 * * ?', label: '每天 2 点' },
+        { value: '0 0 4 * * ?', label: '每天 4 点' },
+        { value: '0 0 2 ? * MON', label: '每周一 2 点' },
+        { value: '0 0 3 ? * MON-FRI', label: '每个工作日 3 点' },
+        { value: '0 0 2 1 * ?', label: '每月 1 号 2 点' }
+      ],
       rules: {
         taskName: [{ required: true, message: '必填' }],
         taskType: [{ required: true }],
@@ -562,7 +635,18 @@ export default {
         sourceId: [{ required: true }],
         targetId: [{ required: true }],
         tableName: [{ required: true }],
-        batchSize: [{ required: true }]
+        batchSize: [{ required: true }],
+        // CRON 调度必须选择执行频率 (MANUAL/EVENT 时本规则不生效)
+        cronExpr: [{
+          validator: (rule, value, callback) => {
+            if (this.form.triggerType === 'CRON' && (!value || !value.trim())) {
+              callback(new Error('定时调度必须选择执行频率'))
+            } else {
+              callback()
+            }
+          },
+          trigger: 'change'
+        }]
       },
       datasources: [], sourceTables: [],
       logDialog: false, logLoading: false, taskLogId: 0,
@@ -612,6 +696,20 @@ export default {
     }
   },
   computed: {
+    /* CRON 下拉可选项: 预设 + 存量值兜底 (导入/旧任务的表达式不在预设里时补进去, 避免下拉框显示空白) */
+    cronSelectOptions () {
+      const cur = this.form && this.form.cronExpr ? this.form.cronExpr.trim() : ''
+      if (cur && !this.cronOptions.some(c => c.value === cur)) {
+        return this.cronOptions.concat([{ value: cur, label: cur + ' (自定义)' }])
+      }
+      return this.cronOptions
+    },
+    /* 事件触发回调地址: 开发环境走 /dev-api 代理, 生产环境直连当前域名 */
+    eventTriggerUrl () {
+      if (!this.form || !this.form.eventToken) return ''
+      const base = process.env.NODE_ENV === 'production' ? window.location.origin : window.location.origin + '/dev-api'
+      return base + '/sync/task/event/' + this.form.eventToken
+    },
     mappingHint () {
       return '按 kettle 风格拖拽源字段到目标字段, 建立一对一字段映射。' +
              '不建立映射 = 按源/目标字段同名同步(原行为, 老任务不受影响)。' +
@@ -871,7 +969,7 @@ export default {
 
     onAdd (type) {
       // DDL 类型不需要 batchSize / idField / timeField, syncMode 填 'DDL' 占位即可
-      const base = { taskType: type, syncMode: type === 'FULL' ? 'ID' : (type === 'DDL' ? 'DDL' : 'BINLOG'), idField: 'id', timeField: 'update_time', overwriteFlag: 0, shardCount: 1 }
+      const base = { taskType: type, syncMode: type === 'FULL' ? 'ID' : (type === 'DDL' ? 'DDL' : 'BINLOG'), idField: 'id', timeField: 'update_time', overwriteFlag: 0, shardCount: 1, triggerType: 'MANUAL' }
       if (type !== 'DDL') base.batchSize = 1000
       this.dialog = true; this.form = base; this.tabActive = 'base'
       this.dmlTypes = ['INSERT', 'UPDATE', 'DELETE']
@@ -879,6 +977,8 @@ export default {
     },
     onEdit (row) {
       this.dialog = true; this.form = Object.assign({}, row); this.tabActive = 'base'
+      // 调度方式兜底: 升级前创建的存量任务没有该字段, 默认按手动处理
+      if (!this.form.triggerType) this.form.triggerType = 'MANUAL'
       // binlog DML 过滤: 库里存逗号串, 界面用勾选数组 (空 = 全部, 与后端语义一致)
       const cfg = row.binlogDmlTypes
       this.dmlTypes = cfg ? cfg.split(',').map(s => s.trim().toUpperCase()).filter(s => ['INSERT', 'UPDATE', 'DELETE'].includes(s)) : ['INSERT', 'UPDATE', 'DELETE']
@@ -1231,6 +1331,24 @@ export default {
 
     resetForm () { this.form = {} },
     modeName (m) { return ({ ID: '按ID', TIME: '按时间', BINLOG: 'Binlog', DDL: '表结构' })[m] || m },
+    /** 复制事件触发地址 (textarea + execCommand 兼容非 https 环境, 不依赖剪贴板 API 权限) */
+    copyEventUrl () {
+      const url = this.eventTriggerUrl
+      if (!url) return
+      const ta = document.createElement('textarea')
+      ta.value = url
+      ta.style.position = 'fixed'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.select()
+      try {
+        document.execCommand('copy')
+        this.$message.success('触发地址已复制')
+      } catch (e) {
+        this.$message.error('复制失败, 请手动选择复制')
+      }
+      document.body.removeChild(ta)
+    },
     statusName (s) { return ({ STOP: '未启动', RUNNING: '运行中', PAUSE: '已暂停', COMPLETED: '已完成', FAILED: '失败' })[s] || s },
     statusType (s) { return ({ STOP: 'info', RUNNING: 'success', PAUSE: 'warning', COMPLETED: '', FAILED: 'danger' })[s] || '' },
     taskTypeName (t) { return ({ FULL: '全量', INCR: '增量', DDL: '表结构' })[t] || t },
@@ -1384,7 +1502,8 @@ function cssEscape (s) {
   padding: 5px 8px;
   font-size: 12px;
 }
-/* 低频动作已收进「更多」下拉, 这列不再需要平铺撑满, 改成左对齐; 间距统一交给 gap */
+/* 低频动作已收进「更多」下拉, 这列不再需要平铺撑满, 改成左对齐; 间距统一交给 gap
+   overflow-x: 溢出兜底 —— 极端窄屏下按钮完整但单元格内可横滑, 不会再被裁掉 */
 .sync-task-table >>> td:last-child .cell {
   display: flex;
   flex-wrap: nowrap;
@@ -1394,7 +1513,11 @@ function cssEscape (s) {
   white-space: nowrap;
   padding-left: 8px;
   padding-right: 8px;
+  overflow-x: auto;
 }
+/* 按钮不参与压缩, 保证滚动条出现时按钮完整 */
+.sync-task-table >>> td:last-child .cell .el-button,
+.sync-task-table >>> td:last-child .cell .el-dropdown { flex-shrink: 0; }
 /* 去掉 element-ui 默认的相邻按钮 10px 左边距, 否则会叠加在 gap 上 */
 .sync-task-table >>> td:last-child .cell .el-button + .el-button { margin-left: 0; }
 /* 「更多」是二级入口: gap 之外再留 6px, 与动作按钮略作区分(合计 14px) */

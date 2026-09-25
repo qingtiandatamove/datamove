@@ -97,6 +97,19 @@ public class SyncTaskController {
         return R.ok(taskService.importTask(vo));
     }
 
+    /* ============ 事件触发 (外部系统回调, 免登录) ============ */
+
+    /**
+     * 事件触发启动: 调度方式为 EVENT 的任务可通过该接口由外部系统触发。
+     * URL 中的 token 即密钥 (任务保存时自动生成), 已在 SecurityConfig 中放行免 JWT。
+     * 例: curl -X POST http://host:8080/sync/task/event/{token}
+     */
+    @ApiOperation("事件触发启动 (外部系统回调, 免登录)")
+    @PostMapping("/event/{token}")
+    public R<Long> triggerByEvent(@PathVariable String token) {
+        return R.ok(taskService.triggerByEvent(token), "任务已触发启动");
+    }
+
     /* 同步操作 */
 
     @ApiOperation("启动")

@@ -186,6 +186,9 @@ public class AuditLogService {
         addIfChanged(rows, revisionId, snapshot, opType, "canalPort",       before, after, SyncTask::getCanalPort);
         addIfChanged(rows, revisionId, snapshot, opType, "canalDestination",before, after, SyncTask::getCanalDestination);
         addIfChanged(rows, revisionId, snapshot, opType, "binlogDmlTypes",  before, after, SyncTask::getBinlogDmlTypes);
+        // 调度方式: 记录类型与表达式; eventToken 是触发密钥, 不写入审计日志
+        addIfChanged(rows, revisionId, snapshot, opType, "triggerType",     before, after, SyncTask::getTriggerType);
+        addIfChanged(rows, revisionId, snapshot, opType, "cronExpr",        before, after, SyncTask::getCronExpr);
         addIfChanged(rows, revisionId, snapshot, opType, "remark",          before, after, SyncTask::getRemark);
 
         // CREATE 还要单独记下 status (add() 强制写成 STOP); DELETE 不打, 反正删了状态没意义

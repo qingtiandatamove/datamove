@@ -15,6 +15,7 @@
 --     upgrade_20260922_data_verify    sync_task.ignore_fields 列 + 数据校验两张表
 --     upgrade_20260923_audit_log      sync_audit_log 表
 --     upgrade_20260923_binlog_filter  sync_task.binlog_dml_types 列
+--     upgrade_20260925_trigger_type   sync_task.trigger_type/cron_expr/event_token 列
 --
 -- 【已有环境】请勿执行本脚本 —— 其中含 DROP TABLE 重建, 会清空业务数据;
 --   请按日期顺序执行 sql/upgrade_*.sql (那些脚本是幂等的)
@@ -151,6 +152,9 @@ CREATE TABLE `sync_task` (
   `canal_port`      int(11)       DEFAULT 11111 COMMENT 'Canal端口(INCR模式)',
   `canal_destination` varchar(100) DEFAULT NULL COMMENT 'Canal destination',
   `binlog_dml_types` varchar(50)  DEFAULT NULL COMMENT 'binlog DML类型过滤(逗号分隔 INSERT/UPDATE/DELETE 子集, 空=全部同步)',
+  `trigger_type`     varchar(16)  NOT NULL DEFAULT 'MANUAL' COMMENT '调度方式(CRON=定时 MANUAL=手动 EVENT=事件触发)',
+  `cron_expr`        varchar(64)  DEFAULT NULL COMMENT 'CRON表达式(Spring 6位:秒 分 时 日 月 周, trigger_type=CRON时必填)',
+  `event_token`      varchar(64)  DEFAULT NULL COMMENT '事件触发令牌(URL中的密钥, trigger_type=EVENT时自动生成)',
   `remark`          varchar(500)  DEFAULT NULL COMMENT '备注',
   `del_flag`        char(1)       NOT NULL DEFAULT '0' COMMENT '删除标志',
   `create_by`       varchar(64)   DEFAULT '' COMMENT '创建者',
@@ -159,6 +163,7 @@ CREATE TABLE `sync_task` (
   `update_time`     datetime      DEFAULT NULL COMMENT '更新时间',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_name` (`task_name`, `del_flag`),
+  UNIQUE KEY `uk_event_token` (`event_token`),
   KEY `idx_status` (`status`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='同步任务表';
 

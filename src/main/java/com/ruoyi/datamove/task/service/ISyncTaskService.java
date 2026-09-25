@@ -56,6 +56,12 @@ public interface ISyncTaskService {
     void stop(Long id);
 
     /**
+     * 事件触发启动: 外部系统通过 HTTP 回调 POST /sync/task/event/{token} 触发。
+     * 按 event_token 定位任务, 校验其调度方式为 EVENT 且未在运行后启动, 返回任务 ID。
+     */
+    Long triggerByEvent(String token);
+
+    /**
      * 重置任务同步进度 (清断点): 仅 FULL 任务, 且非 RUNNING 状态可重置
      * 重置后状态回到 STOP, 下次启动会从头全量同步; 历史日志保留
      */
