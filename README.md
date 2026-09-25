@@ -13,6 +13,7 @@
 | 数据校验 + 一键修复 | 源/目标双游标流式归并，定位到行/字段差异，一键补 INSERT / 修 UPDATE（**不删目标库数据**） |
 | 断点续传 + 幂等 | 每批 `INSERT ... ON DUPLICATE KEY UPDATE` 成功才推进断点，重跑不脏数据 |
 | 全量 + 增量双模式 | 全量按主键 ID / 时间字段分批拉取，增量用 binlog 实时订阅 |
+| 定时调度 + 事件触发 | 任务支持 **CRON 定时 / 手动 / 事件触发** 三选一调度：定时任务按表达式到点自动执行（可视化 Cron 生成器，秒/分/时/天/月/周分页签配置）；事件触发生成专属回调 URL，外部系统一个 `POST /sync/task/event/{token}` 即可拉起任务（令牌即密钥，免登录），任务运行中自动跳过本次触发 |
 | 分片并行提速 | FULL+ID 模式按主键区间拆多线程并行，**1000 万行从 ~31 分钟降到数分钟** |
 | binlog 事件过滤 | 服务端订阅收紧为「源库.任务表」，无关库表事件不进客户端；**DML 类型按需勾选**（如归档库只收 INSERT）；**忽略字段**让 INSERT/UPDATE 不写指定列 —— 三层过滤**避免无关事件污染下游** |
 | 任务一键克隆 | 一键复制源任务的全部业务配置（数据源 / 同步模式 / 批次分片 / Canal / 字段映射），运行态字段（状态/起始位点/源表名）自动重置；任务名 `.copy` 后缀自动去重，并发克隆撞唯一索引时 UUID 短后缀兜底；克隆后弹窗顶部强提示"请修改表名+任务名后再启动"，避免表名沿用导致重复消费 binlog |
@@ -52,7 +53,7 @@
 | 校验 | 源/目标双游标流式归并比对 (`setFetchSize` 流式读取, 内存里只驻留一行) |
 | 修复 | 按差异明细回放 INSERT(补缺失) / UPDATE(只改不一致的列), 不删目标库多余行 |
 | 加密 | AES 对称加密 (BC) |
-| 调度 | Spring `@Scheduled` + ThreadPool |
+| 调度 | ThreadPoolTaskScheduler (CRON 定时) + HTTP 事件回调 |
 | 告警 | 钉钉 Webhook |
 | 数据库 | MySQL 8.0 |
 
@@ -142,6 +143,13 @@ datamove/
 
 ### 5.2 同步任务管理 - 对应文档 3.2
 - 支持两种任务类型: **全量 (FULL) / 增量 (INCR-Binlog)**
+- **调度方式三选一** (`sync_task.trigger_type`):
+  - **手动 (MANUAL)**: 界面点「启动」才执行 (默认)
+  - **定时 (CRON)**: 按表达式到点自动启动, 与手动启动完全等价; 任务运行中跳过本次, 下个周期再触发;
+    表达式可从常用频率下拉选择, 或用**可视化 Cron 生成器**(秒/分/时/天/月/周分页签, 周期/间隔/具体值自由组合)生成;
+    保存即生效无需再点启动, 改配置自动重注册, 服务重启自动重装载
+  - **事件触发 (EVENT)**: 保存后自动生成触发令牌, 外部系统 `POST /sync/task/event/{token}` 免登录拉起任务;
+    令牌即密钥, 克隆/导入的任务重新生成新令牌
 - 全量同步两种模式:
   - **按主键 ID** (`WHERE id > #{lastId} ORDER BY id ASC LIMIT #{batchSize}`)
   - **按时间字段** (`WHERE time > #{lastTime} OR (time = #{lastTime} AND id > #{lastIdInBatch}) ORDER BY time ASC, id ASC LIMIT ...`)
@@ -315,6 +323,7 @@ mysql -uroot -p datamove < sql/upgrade_20260922_task_run.sql
 mysql -uroot -p datamove < sql/upgrade_20260922_data_verify.sql
 mysql -uroot -p datamove < sql/upgrade_20260923_audit_log.sql
 mysql -uroot -p datamove < sql/upgrade_20260923_binlog_filter.sql
+mysql -uroot -p datamove < sql/upgrade_20260925_trigger_type.sql
 ```
 
 ### 3. 启动后端
