@@ -5,6 +5,7 @@ import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.domain.TaskDashboardVO;
+import com.ruoyi.datamove.task.domain.TaskExportVO;
 
 import java.util.List;
 
@@ -32,6 +33,21 @@ public interface ISyncTaskService {
      * 仅允许克隆 STOP / PAUSE / COMPLETED / FAILED 状态的任务, RUNNING 不允许克隆(避免状态错乱)。
      */
     Long clone(Long sourceId);
+
+    /**
+     * 导出任务配置 (JSON 结构, 用于跨环境迁移):
+     * 包含全部业务配置 + 数据源引用(按名称) + 字段映射; 不含运行态(id/状态/断点)、数据源密码、日志。
+     */
+    TaskExportVO exportTask(Long id);
+
+    /**
+     * 导入任务配置 (与 exportTask 配对, 用于跨环境迁移):
+     * 数据源按「同名」匹配当前环境并重映射 ID (不存在则报错, 提示先在目标环境建同名数据源);
+     * 任务名冲突时自动加 .import 后缀去重; 状态重置为 STOP, 断点清空, 字段映射一并导入。
+     *
+     * @return 新任务 ID
+     */
+    Long importTask(TaskExportVO vo);
 
     /* 同步生命周期 */
     void start(Long id);

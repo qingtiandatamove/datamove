@@ -57,6 +57,10 @@ export function stopTask (id) { return request({ url: `/sync/task/${id}/stop`, m
 export function resetTask (id) { return request({ url: `/sync/task/${id}/reset`, method: 'post' }) }
 /* 克隆任务: 复制源任务的全部业务配置, 重置状态/源表名/起始位点, 返回新任务 ID (新任务必须修改表名后才能启动) */
 export function cloneTask (id) { return request({ url: `/sync/task/${id}/clone`, method: 'post' }) }
+/* 导出任务配置 (JSON): 前端拿到后保存为 .json 文件, 用于跨环境迁移 */
+export function exportTask (id) { return request({ url: `/sync/task/${id}/export`, method: 'get' }) }
+/* 导入任务配置: 数据源按同名匹配当前环境重映射, 撞名自动加 .import 后缀, 返回新任务 ID */
+export function importTask (data) { return request({ url: '/sync/task/import', method: 'post', data }) }
 export function taskProgress (id) { return request({ url: `/sync/task/${id}/progress`, method: 'get' }) }
 /* 清理某个任务的日志: 不传 beforeDays = 清全部; 传 N = 只清 N 天前的历史日志. 返回删除条数 */
 export function clearTaskLog (id, beforeDays) {

@@ -18,6 +18,7 @@ import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.domain.SyncTaskRun;
 import com.ruoyi.datamove.task.domain.TaskDashboardVO;
+import com.ruoyi.datamove.task.domain.TaskExportVO;
 import com.ruoyi.datamove.task.mapper.SyncTaskFieldMappingMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskLogMapper;
 import com.ruoyi.datamove.task.mapper.SyncTaskMapper;
@@ -270,6 +271,186 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         auditLogService.recordTaskCreate(copy);
         log.info("[clone] 源任务 #{}({}) → 新任务 #{}, 字段映射 {} 条", src.getId(), src.getTaskName(), copy.getId(), mappings == null ? 0 : mappings.size());
         return copy.getId();
+    }
+
+    /* ==================== 任务导入导出 (配置迁移) ==================== */
+
+    @Override
+    public TaskExportVO exportTask(Long id) {
+        SyncTask task = taskMapper.selectById(id);
+        if (task == null) throw new RuntimeException("任务不存在: " + id);
+        if ("1".equals(task.getDelFlag())) throw new RuntimeException("任务已删除, 不允许导出");
+
+        TaskExportVO vo = new TaskExportVO();
+        vo.setExportedAt(new Date());
+
+        // 业务配置 1:1 (导出即快照, 不含运行态)
+        vo.setTaskName(task.getTaskName());
+        vo.setTaskType(task.getTaskType());
+        vo.setSyncMode(task.getSyncMode());
+        vo.setTableName(task.getTableName());
+        vo.setIdField(task.getIdField());
+        vo.setTimeField(task.getTimeField());
+        vo.setBatchSize(task.getBatchSize());
+        vo.setShardCount(task.getShardCount());
+        vo.setIgnoreFields(task.getIgnoreFields());
+        vo.setOverwriteFlag(task.getOverwriteFlag());
+        vo.setDingtalkWebhook(task.getDingtalkWebhook());
+        vo.setAlertEmail(task.getAlertEmail());
+        vo.setRemark(task.getRemark());
+        vo.setCanalHost(task.getCanalHost());
+        vo.setCanalPort(task.getCanalPort());
+        vo.setCanalDestination(task.getCanalDestination());
+        vo.setBinlogDmlTypes(task.getBinlogDmlTypes());
+
+        // 数据源引用: 按名称导出 (跨环境 ID 不可沿用), 附 host/port/dbName 供人工核对
+        vo.setSourceDatasourceRef(toRef(task.getSourceId()));
+        vo.setTargetDatasourceRef(toRef(task.getTargetId()));
+        SyncDatasource src = datasourceMapper.selectById(task.getSourceId());
+        SyncDatasource tgt = datasourceMapper.selectById(task.getTargetId());
+        if (src == null) throw new RuntimeException("源数据源不存在 (id=" + task.getSourceId() + "), 请检查任务配置");
+        if (tgt == null) throw new RuntimeException("目标数据源不存在 (id=" + task.getTargetId() + "), 请检查任务配置");
+        vo.setSourceDatasourceName(src.getDatasourceName());
+        vo.setTargetDatasourceName(tgt.getDatasourceName());
+
+        // 字段映射
+        List<SyncTaskFieldMapping> mappings = fieldMappingService.listByTaskId(id);
+        if (mappings != null && !mappings.isEmpty()) {
+            vo.setFieldMappings(mappings.stream().map(m -> {
+                TaskExportVO.FieldMappingItem item = new TaskExportVO.FieldMappingItem();
+                item.setSourceField(m.getSourceField());
+                item.setTargetField(m.getTargetField());
+                item.setSortNo(m.getSortNo());
+                return item;
+            }).collect(java.util.stream.Collectors.toList()));
+        }
+        log.info("[export] 任务 #{}({}) 导出, 字段映射 {} 条", id, task.getTaskName(), vo.getFieldMappings() == null ? 0 : vo.getFieldMappings().size());
+        return vo;
+    }
+
+    @Override
+    @Transactional
+    public Long importTask(TaskExportVO vo) {
+        if (vo == null) throw new RuntimeException("导入内容为空");
+        // 版本兼容: 目前只有 v1; 未来结构变化时在这里分支处理旧版本
+        if (vo.getExportVersion() == null) vo.setExportVersion(1);
+        if (vo.getTaskType() == null
+                || !(SyncType.TASK_FULL.equalsIgnoreCase(vo.getTaskType())
+                  || SyncType.TASK_INCR.equalsIgnoreCase(vo.getTaskType())
+                  || SyncType.TASK_DDL.equalsIgnoreCase(vo.getTaskType()))) {
+            throw new RuntimeException("导入文件里的任务类型不合法: " + vo.getTaskType());
+        }
+        if (vo.getTableName() == null || vo.getTableName().isEmpty()) {
+            throw new RuntimeException("导入文件缺少同步表名 (tableName)");
+        }
+
+        // 数据源按名称重映射: 目标环境必须已存在同名数据源 (数据源含密码, 不适合随任务迁移, 引导用户先建)
+        SyncDatasource sourceDs = findDatasourceByName(vo.getSourceDatasourceName());
+        SyncDatasource targetDs = findDatasourceByName(vo.getTargetDatasourceName());
+
+        SyncTask t = new SyncTask();
+        t.setTaskType(vo.getTaskType());
+        t.setSyncMode(vo.getSyncMode() == null || vo.getSyncMode().isEmpty()
+                ? SyncType.MODE_DDL : vo.getSyncMode()); // DDL 缺省占位, 与 add() 逻辑一致
+        t.setSourceId(sourceDs.getId());
+        t.setTargetId(targetDs.getId());
+        t.setTableName(vo.getTableName());
+        t.setIdField(vo.getIdField());
+        t.setTimeField(vo.getTimeField());
+        t.setBatchSize(vo.getBatchSize() == null ? 1000 : vo.getBatchSize());
+        t.setShardCount(vo.getShardCount() == null ? 1 : vo.getShardCount());
+        t.setIgnoreFields(vo.getIgnoreFields());
+        t.setOverwriteFlag(vo.getOverwriteFlag() == null ? 0 : vo.getOverwriteFlag());
+        t.setDingtalkWebhook(vo.getDingtalkWebhook());
+        t.setAlertEmail(vo.getAlertEmail());
+        t.setCanalHost(vo.getCanalHost());
+        t.setCanalPort(vo.getCanalPort());
+        t.setCanalDestination(vo.getCanalDestination());
+        t.setBinlogDmlTypes(normalizeBinlogDmlTypes(vo.getBinlogDmlTypes()));
+        // 运行态全部重置: 导入的是配置, 不是进度
+        t.setStartId(null);
+        t.setStartTime(null);
+        t.setStatus(SyncType.STATUS_STOP);
+        t.setDelFlag("0");
+        // 撞名自动加 .import 后缀, 不阻断迁移 (改个名字就能用, 比报错让用户手工改文件友好)
+        t.setTaskName(buildImportName(vo.getTaskName()));
+        String oldRemark = vo.getRemark();
+        t.setRemark("导入任务 (源环境数据源: " + vo.getSourceDatasourceName() + " → " + vo.getTargetDatasourceName() + ")"
+                + (oldRemark == null || oldRemark.isEmpty() ? "" : "\n" + oldRemark));
+        insertWithUniqueName(t);
+
+        // 进度初始化 (与 add() 一致)
+        SyncTaskProgress p = new SyncTaskProgress();
+        p.setTaskId(t.getId());
+        p.setLastSyncMaxId(0L);
+        p.setTotalRows(0L);
+        p.setStatus(SyncType.STATUS_STOP);
+        p.setCreateTime(new Date());
+        p.setUpdateTime(new Date());
+        progressMapper.insert(p);
+
+        // 字段映射一并导入
+        if (vo.getFieldMappings() != null && !vo.getFieldMappings().isEmpty()) {
+            List<SyncTaskFieldMapping> mappings = new ArrayList<>();
+            for (TaskExportVO.FieldMappingItem item : vo.getFieldMappings()) {
+                if (item == null || item.getSourceField() == null || item.getTargetField() == null) continue;
+                SyncTaskFieldMapping m = new SyncTaskFieldMapping();
+                m.setSourceField(item.getSourceField());
+                m.setTargetField(item.getTargetField());
+                m.setSortNo(item.getSortNo() == null ? mappings.size() : item.getSortNo());
+                mappings.add(m);
+            }
+            if (!mappings.isEmpty()) {
+                fieldMappingService.replace(t.getId(), mappings);
+            }
+        }
+
+        auditLogService.recordTaskCreate(t);
+        log.info("[import] 任务「{}」导入为新任务 #{}, 数据源 {}→{} 重映射为 id {}→{}, 字段映射 {} 条",
+                vo.getTaskName(), t.getId(), vo.getSourceDatasourceName(), vo.getTargetDatasourceName(),
+                sourceDs.getId(), targetDs.getId(),
+                vo.getFieldMappings() == null ? 0 : vo.getFieldMappings().size());
+        return t.getId();
+    }
+
+    /** 数据源 id → 参考信息 (不含密码/账号) */
+    private TaskExportVO.DatasourceRef toRef(Long datasourceId) {
+        TaskExportVO.DatasourceRef ref = new TaskExportVO.DatasourceRef();
+        if (datasourceId == null) return ref;
+        SyncDatasource ds = datasourceMapper.selectById(datasourceId);
+        if (ds != null) {
+            ref.setHost(ds.getHost());
+            ref.setPort(ds.getPort());
+            ref.setDbName(ds.getDbName());
+        }
+        return ref;
+    }
+
+    /** 按名称查当前环境的数据源, 查不到给出明确指引 (而不是让后续 NPE) */
+    private SyncDatasource findDatasourceByName(String name) {
+        if (name == null || name.trim().isEmpty()) {
+            throw new RuntimeException("导入文件缺少数据源名称, 可能不是本系统导出的任务文件");
+        }
+        List<SyncDatasource> list = datasourceMapper.selectList(
+                new QueryWrapper<SyncDatasource>().eq("datasource_name", name).eq("del_flag", "0"));
+        if (list == null || list.isEmpty()) {
+            throw new RuntimeException("当前环境不存在名为「" + name + "」的数据源, 请先在「数据源管理」创建同名数据源后再导入");
+        }
+        return list.get(0);
+    }
+
+    /** 导入撞名: taskName.import → taskName.import (2) → … (与克隆的 .copy 命名区分开) */
+    private String buildImportName(String sourceName) {
+        if (sourceName == null || sourceName.trim().isEmpty()) sourceName = "imported-task";
+        String base = sourceName + ".import";
+        String candidate = base;
+        int seq = 2;
+        while (true) {
+            Long n = taskMapper.selectCount(
+                    new QueryWrapper<SyncTask>().eq("task_name", candidate).eq("del_flag", "0"));
+            if (n == null || n == 0) return candidate;
+            candidate = base + " (" + (seq++) + ")";
+        }
     }
 
     /**

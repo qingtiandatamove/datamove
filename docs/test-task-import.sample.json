@@ -1,0 +1,50 @@
+{
+  "exportVersion": 1,
+  "exportedAt": "2026-09-24 22:20:00",
+  "taskName": "测试导入任务-全量分片",
+  "taskType": "FULL",
+  "syncMode": "ID",
+  "tableName": "data_move_test",
+  "idField": "id",
+  "timeField": "update_time",
+  "batchSize": 5000,
+  "shardCount": 4,
+  "ignoreFields": "update_time,update_by",
+  "overwriteFlag": 1,
+  "dingtalkWebhook": "https://oapi.dingtalk.com/robot/send?access_token=test-token",
+  "alertEmail": "ops@example.com,dev@example.com",
+  "remark": "这是用于测试导入功能的样例配置, 从测试环境导出",
+  "canalHost": null,
+  "canalPort": 11111,
+  "canalDestination": null,
+  "binlogDmlTypes": null,
+  "sourceDatasourceName": "源库v2",
+  "targetDatasourceName": "目标库",
+  "sourceDatasourceRef": {
+    "host": "192.168.1.100",
+    "port": 3306,
+    "dbName": "datamove"
+  },
+  "targetDatasourceRef": {
+    "host": "192.168.1.101",
+    "port": 3306,
+    "dbName": "datamove_bak"
+  },
+  "fieldMappings": [
+    {
+      "sourceField": "id",
+      "targetField": "id",
+      "sortNo": 0
+    },
+    {
+      "sourceField": "user_name",
+      "targetField": "name",
+      "sortNo": 1
+    },
+    {
+      "sourceField": "create_time",
+      "targetField": "created_at",
+      "sortNo": 2
+    }
+  ]
+}

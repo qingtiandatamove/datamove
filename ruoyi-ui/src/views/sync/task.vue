@@ -7,6 +7,7 @@
           <el-button type="primary" icon="el-icon-plus" size="mini" @click="onAdd('FULL')">新建全量任务</el-button>
           <el-button type="success" icon="el-icon-plus" size="mini" @click="onAdd('INCR')">新建增量任务</el-button>
           <el-button type="warning" icon="el-icon-plus" size="mini" @click="onAdd('DDL')">同步表结构</el-button>
+          <el-button plain icon="el-icon-upload2" size="mini" @click="openImportDialog">导入任务</el-button>
           <el-button type="danger" plain icon="el-icon-delete" size="mini" @click="openClearDialog">日志清理</el-button>
         </el-button-group>
       </div>
@@ -102,6 +103,8 @@
               <el-dropdown-menu slot="dropdown">
                 <el-dropdown-item command="clone" icon="el-icon-document-copy"
                   :disabled="s.row.status === 'RUNNING'">克隆任务</el-dropdown-item>
+                <el-dropdown-item command="export" icon="el-icon-download"
+                  :disabled="s.row.status === 'RUNNING'">导出配置</el-dropdown-item>
                 <el-dropdown-item v-if="s.row.taskType !== 'DDL'" command="reset"
                   icon="el-icon-refresh-left" :disabled="s.row.status === 'RUNNING'">重置进度</el-dropdown-item>
                 <el-dropdown-item command="log" icon="el-icon-tickets">查看日志</el-dropdown-item>
@@ -391,6 +394,60 @@
       </div>
     </el-dialog>
 
+    <!-- 导入任务弹窗: 选 .json 配置文件 → 解析预览(数据源名是否存在于本环境) → 确认导入 -->
+    <el-dialog title="导入任务" :visible.sync="importDialog" width="620px" @closed="resetImportState">
+      <el-alert type="info" :closable="false" show-icon style="margin-bottom:12px"
+        title="从其他环境导出的任务 JSON 文件一键导入"
+        description="数据源按「同名」匹配当前环境 (需先在本环境创建同名数据源); 任务名冲突会自动加 .import 后缀; 导入后状态为未启动。"/>
+
+      <el-upload
+        drag action="" :auto-upload="false" accept=".json"
+        :limit="1" :on-change="onImportFileChange" :on-remove="resetImportState"
+        :file-list="importFileList">
+        <i class="el-icon-upload"></i>
+        <div class="el-upload__text">将任务 JSON 文件拖到此处, 或<em>点击选择</em></div>
+      </el-upload>
+
+      <!-- 解析成功后的预览: 让用户在提交前看到要导入什么、数据源能否匹配上 -->
+      <template v-if="importPreview">
+        <div class="import-preview">
+          <div class="import-preview-title">配置预览</div>
+          <el-descriptions :column="2" size="small" border>
+            <el-descriptions-item label="任务名称">{{ importPreview.taskName }}</el-descriptions-item>
+            <el-descriptions-item label="类型">{{ taskTypeName(importPreview.taskType) }}</el-descriptions-item>
+            <el-descriptions-item label="同步表名">{{ importPreview.tableName }}</el-descriptions-item>
+            <el-descriptions-item label="字段映射">{{ (importPreview.fieldMappings || []).length }} 对</el-descriptions-item>
+            <el-descriptions-item label="源数据源" :span="2">
+              {{ importPreview.sourceDatasourceName }}
+              <el-tag v-if="sourceDsMatched" size="mini" type="success">已匹配</el-tag>
+              <el-tag v-else size="mini" type="danger">当前环境不存在</el-tag>
+              <span v-if="importPreview.sourceDatasourceRef" class="import-ds-ref">
+                ({{ importPreview.sourceDatasourceRef.host }}:{{ importPreview.sourceDatasourceRef.port }}/{{ importPreview.sourceDatasourceRef.dbName }})
+              </span>
+            </el-descriptions-item>
+            <el-descriptions-item label="目标数据源" :span="2">
+              {{ importPreview.targetDatasourceName }}
+              <el-tag v-if="targetDsMatched" size="mini" type="success">已匹配</el-tag>
+              <el-tag v-else size="mini" type="danger">当前环境不存在</el-tag>
+              <span v-if="importPreview.targetDatasourceRef" class="import-ds-ref">
+                ({{ importPreview.targetDatasourceRef.host }}:{{ importPreview.targetDatasourceRef.port }}/{{ importPreview.targetDatasourceRef.dbName }})
+              </span>
+            </el-descriptions-item>
+          </el-descriptions>
+          <el-alert v-if="!sourceDsMatched || !targetDsMatched" type="error" :closable="false" show-icon
+            style="margin-top:10px"
+            title="数据源未匹配"
+            :description="'请先在「数据源管理」创建同名数据源 (' + unmatchedDsNames + ') 后再导入'"/>
+        </div>
+      </template>
+
+      <div slot="footer">
+        <el-button @click="importDialog = false">取 消</el-button>
+        <el-button type="primary" :loading="importing" :disabled="!importPreview || !sourceDsMatched || !targetDsMatched"
+          @click="onImportConfirm">确认导入</el-button>
+      </div>
+    </el-dialog>
+
     <!-- 数据校验抽屉: 比对进度 + 差异明细 + 一键同步缺失数据 -->
     <el-drawer :title="verifyTitle" :visible.sync="verifyDrawer" size="75%" @closed="onVerifyClosed">
       <div style="padding:0 20px 24px">
@@ -484,7 +541,8 @@ import { pageTask, detailTask, addTask, updateTask, deleteTask, cloneTask,
          listDataSource, listTables, listColumns,
          listFieldMapping, saveFieldMapping, clearFieldMapping,
          startVerify, verifyDetail, latestVerify, verifyDiffs,
-         repairVerify, stopVerify } from '@/api/datamove'
+         repairVerify, stopVerify,
+         exportTask, importTask } from '@/api/datamove'
 
 export default {
   data () {
@@ -542,7 +600,15 @@ export default {
       // 校验/修复期间轮询进度
       verifyTimer: null,
       // 校验轮询连续失败次数: 连续失败就停轮询, 避免无意义地一直打接口
-      verifyFailCount: 0
+      verifyFailCount: 0,
+
+      /* ============ 任务导入导出 (配置迁移) ============ */
+      // 导入弹窗状态
+      importDialog: false,
+      importing: false,
+      importFileList: [],
+      // 解析出的导入配置 (null = 还没选文件)
+      importPreview: null
     }
   },
   computed: {
@@ -570,6 +636,19 @@ export default {
       const fixable = Math.min(Number(v.diffRows || 0), Number(v.savedDiffs || 0))
       const done = Number(v.repairedRows || 0) + Number(v.repairFailedRows || 0)
       return done < fixable
+    },
+    /* 导入预览: 源/目标数据源名是否存在于当前环境 (datasources 在 mounted 时已加载) */
+    sourceDsMatched () {
+      return !!(this.importPreview && this.datasources.some(d => d.datasourceName === this.importPreview.sourceDatasourceName))
+    },
+    targetDsMatched () {
+      return !!(this.importPreview && this.datasources.some(d => d.datasourceName === this.importPreview.targetDatasourceName))
+    },
+    unmatchedDsNames () {
+      const names = []
+      if (this.importPreview && !this.sourceDsMatched) names.push(this.importPreview.sourceDatasourceName)
+      if (this.importPreview && !this.targetDsMatched) names.push(this.importPreview.targetDatasourceName)
+      return [...new Set(names)].join('、')
     }
   },
   watch: {
@@ -903,6 +982,7 @@ export default {
     onRowCommand (act, row) {
       const handlers = {
         clone: 'onClone',
+        export: 'onExport',
         reset: 'onReset',
         log: 'onLog',
         clearLog: 'onClearTaskLog',
@@ -939,6 +1019,88 @@ export default {
           if (err && err !== 'cancel') this.$message.error('克隆失败:' + (err.message || ''))
         })
     },
+
+    /* ==================== 任务导入导出 (配置迁移) ==================== */
+
+    /**
+     * 导出任务配置: 拿到 JSON 后在浏览器侧触发下载 (不依赖后端文件流接口),
+     * 文件名 = 任务名.task.json, 拿到其他环境用「导入任务」导入
+     */
+    onExport (row) {
+      exportTask(row.id).then(r => {
+        const data = r.data || {}
+        // 补下载元信息, 方便拿到目标环境的人一眼看懂文件来源 (后端已有 exportedAt, 这里不动结构只下载)
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = (row.taskName || ('task-' + row.id)) + '.task.json'
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        URL.revokeObjectURL(url)
+        this.$message.success('已导出「' + row.taskName + '」配置, 可在其他环境导入')
+      }).catch(err => {
+        this.$message.error('导出失败:' + (err.message || ''))
+      })
+    },
+
+    /** 打开导入弹窗: 顺便刷新数据源列表 (匹配判断依赖它) */
+    openImportDialog () {
+      this.loadDatasources()
+      this.importDialog = true
+    },
+
+    /**
+     * 选文件后解析 JSON 做预览: 解析失败/结构不对直接提示, 不等点确认才发现
+     * (auto-upload=false, on-change 在选择文件时触发一次)
+     */
+    onImportFileChange (file) {
+      this.importFileList = [file]
+      this.importPreview = null
+      const reader = new FileReader()
+      reader.onload = e => {
+        try {
+          const vo = JSON.parse(e.target.result)
+          if (!vo || !vo.taskName || !vo.taskType || !vo.tableName) {
+            this.$message.error('文件结构不合法: 不是本系统导出的任务配置 (缺少 taskName/taskType/tableName)')
+            this.importFileList = []
+            return
+          }
+          this.importPreview = vo
+        } catch (ex) {
+          this.$message.error('JSON 解析失败: ' + ex.message)
+          this.importFileList = []
+        }
+      }
+      reader.onerror = () => {
+        this.$message.error('文件读取失败')
+        this.importFileList = []
+      }
+      reader.readAsText(file.raw)
+    },
+
+    /** 确认导入: 后端按同名重映射数据源、撞名加后缀, 成功后刷新列表 */
+    onImportConfirm () {
+      if (!this.importPreview) return
+      this.importing = true
+      importTask(this.importPreview).then(r => {
+        const newId = r && r.data
+        this.$message.success('导入成功, 新任务 ID=' + newId + ' (未启动, 请检查配置后再启动)')
+        this.importDialog = false
+        this.load()
+      }).catch(err => {
+        this.$message.error('导入失败:' + (err.message || '未知错误'))
+      }).finally(() => { this.importing = false })
+    },
+
+    /** 关闭导入弹窗时清状态 (文件列表/预览), 下次打开是干净界面 */
+    resetImportState () {
+      this.importFileList = []
+      this.importPreview = null
+    },
+
+    /* ==================== 任务导入导出 end ==================== */
 
     /**
      * 自动轮询: 只在有任务处于 RUNNING 时定时拉取最新状态
@@ -1241,6 +1403,13 @@ function cssEscape (s) {
 .sync-task-table >>> td:last-child .op-more { color: #606266; }
 /* 下拉里的危险动作 */
 .op-danger { color: #F56C6C; }
+
+/* ============ 导入任务弹窗 - 配置预览 ============ */
+.import-preview { margin-top: 14px }
+.import-preview-title {
+  font-size: 13px; color: #606266; font-weight: 600; margin-bottom: 8px;
+}
+.import-ds-ref { color: #909399; font-size: 12px; margin-left: 4px }
 
 /* ============ 字段映射 - kettle 风格 ============ */
 .fm-toolbar { display: flex; align-items: center; gap: 8px; margin-bottom: 8px }

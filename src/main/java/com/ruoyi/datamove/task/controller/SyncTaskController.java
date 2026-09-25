@@ -6,6 +6,7 @@ import com.ruoyi.datamove.task.domain.SyncTask;
 import com.ruoyi.datamove.task.domain.SyncTaskLog;
 import com.ruoyi.datamove.task.domain.SyncTaskProgress;
 import com.ruoyi.datamove.task.domain.TaskDashboardVO;
+import com.ruoyi.datamove.task.domain.TaskExportVO;
 import com.ruoyi.datamove.task.service.ISyncTaskService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
@@ -75,6 +76,25 @@ public class SyncTaskController {
     @PostMapping("/{id}/clone")
     public R<Long> cloneTask(@PathVariable Long id) {
         return R.ok(taskService.clone(id));
+    }
+
+    /* ============ 配置迁移 (导入导出) ============ */
+
+    /** 导出任务配置: 前端拿到 JSON 后保存为 .json 文件, 拿到目标环境导入 */
+    @ApiOperation("导出任务配置 (JSON, 跨环境迁移)")
+    @GetMapping("/{id}/export")
+    public R<TaskExportVO> exportTask(@PathVariable Long id) {
+        return R.ok(taskService.exportTask(id));
+    }
+
+    /**
+     * 导入任务配置: 数据源按「同名」匹配当前环境重映射 ID (不存在则报错),
+     * 任务名冲突自动加 .import 后缀, 状态重置 STOP、断点清空, 字段映射一并导入。
+     */
+    @ApiOperation("导入任务配置 (JSON, 跨环境迁移)")
+    @PostMapping("/import")
+    public R<Long> importTask(@RequestBody TaskExportVO vo) {
+        return R.ok(taskService.importTask(vo));
     }
 
     /* 同步操作 */
