@@ -149,6 +149,14 @@ export function getRoleMenus (id) { return request({ url: `/system/role/${id}/me
 /* menuIds 为空数组表示取消该角色的全部权限 */
 export function saveRoleMenus (id, menuIds) { return request({ url: `/system/role/${id}/menus`, method: 'put', data: menuIds || [] }) }
 
+/* ============ 告警中心 ============ */
+export function pageAlert (params) { return request({ url: '/sync/alert/page', method: 'get', params }) }
+export function alertStats () { return request({ url: '/sync/alert/stats', method: 'get' }) }
+export function retryAlert (id) { return request({ url: `/sync/alert/${id}/retry`, method: 'post' }) }
+export function testAlert (data) { return request({ url: '/sync/alert/test', method: 'post', data }) }
+export function deleteAlert (id) { return request({ url: `/sync/alert/${id}`, method: 'delete' }) }
+export function clearAlert (days) { return request({ url: `/sync/alert/clear?days=${days}`, method: 'post' }) }
+
 /* ============ 菜单 ============ */
 /* 当前登录用户可见的菜单树 (侧边栏按权限动态渲染) */
 export function getMyMenus () { return request({ url: '/system/menu/routers', method: 'get' }) }
