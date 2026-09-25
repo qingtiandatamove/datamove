@@ -132,3 +132,25 @@ export function updateUser (data) { return request({ url: '/system/user', method
 export function deleteUser (id) { return request({ url: `/system/user/${id}`, method: 'delete' }) }
 export function resetUser (id, password) { return request({ url: `/system/user/${id}/reset`, method: 'post', data: { password } }) }
 export function changeUserStatus (id, status) { return request({ url: `/system/user/${id}/status?status=${status}`, method: 'post' }) }
+
+/* ============ 角色 / 用户授权 ============ */
+export function listRoles () { return request({ url: '/system/role/list', method: 'get' }) }
+export function getUserRoles (id) { return request({ url: `/system/user/${id}/roles`, method: 'get' }) }
+/* roleIds 为空数组表示取消该用户的全部角色 */
+export function saveUserRoles (id, roleIds) { return request({ url: `/system/user/${id}/roles`, method: 'put', data: roleIds || [] }) }
+
+/* ============ 角色管理 ============ */
+export function pageRole (params) { return request({ url: '/system/role/page', method: 'get', params }) }
+export function addRole (data) { return request({ url: '/system/role', method: 'post', data }) }
+export function updateRole (data) { return request({ url: '/system/role', method: 'put', data }) }
+export function deleteRole (id) { return request({ url: `/system/role/${id}`, method: 'delete' }) }
+export function changeRoleStatus (id, status) { return request({ url: `/system/role/${id}/status?status=${status}`, method: 'post' }) }
+export function getRoleMenus (id) { return request({ url: `/system/role/${id}/menus`, method: 'get' }) }
+/* menuIds 为空数组表示取消该角色的全部权限 */
+export function saveRoleMenus (id, menuIds) { return request({ url: `/system/role/${id}/menus`, method: 'put', data: menuIds || [] }) }
+
+/* ============ 菜单 ============ */
+/* 当前登录用户可见的菜单树 (侧边栏按权限动态渲染) */
+export function getMyMenus () { return request({ url: '/system/menu/routers', method: 'get' }) }
+/* 全部菜单树(含按钮), 角色授权弹窗用 */
+export function listMenuTree () { return request({ url: '/system/menu/tree', method: 'get' }) }

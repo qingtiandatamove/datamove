@@ -8,6 +8,7 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import java.util.List;
 
 /**
  * 用户表 sys_user (RuoYi 兼容)
@@ -36,4 +37,15 @@ public class SysUser implements Serializable {
     private String updateBy;
     private Date updateTime;
     private String remark;
+
+    /**
+     * 非表字段: 该用户已分配的角色ID。
+     * 查询时由 SysPermissionService 填充, 新增/修改时作为入参落 sys_user_role。
+     */
+    @TableField(exist = false)
+    private List<Long> roleIds;
+
+    /** 非表字段: 角色名(列表页展示用, 免得前端再拿ID反查) */
+    @TableField(exist = false)
+    private List<String> roleNames;
 }

@@ -8,29 +8,23 @@
       <!-- 菜单颜色不用 el-menu 的 background-color/text-color props:
            那些 props 会生成内联样式, 优先级压过 CSS 变量, 暗色主题下菜单颜色切不过来。
            统一走下面的 CSS (var(--bg-aside) 在暗色主题下自动变 #0d0d0d) -->
+      <!-- 菜单项由后端按当前用户权限下发(store.menus), 不再写死在前端:
+           改了角色授权后重新登录即可看到新菜单 -->
       <el-menu
         router
+        v-loading="menuLoading"
         :default-active="$route.path">
-        <el-menu-item index="/index"><i class="el-icon-house"></i><span>首页</span></el-menu-item>
-        <el-submenu index="200">
-          <template slot="title"><i class="el-icon-edit-outline"></i><span>数据工作台</span></template>
-          <el-menu-item index="/browse"><i class="el-icon-search"></i><span>数据中心</span></el-menu-item>
-          <el-menu-item index="/sql"><i class="el-icon-monitor"></i><span>SQL 工作台</span></el-menu-item>
-          <el-menu-item index="/sql-log"><i class="el-icon-tickets"></i><span>SQL 执行日志</span></el-menu-item>
-        </el-submenu>
-        <el-submenu index="100">
-          <template slot="title"><i class="el-icon-share"></i><span>数据集成中心</span></template>
-          <el-menu-item index="/sync/datasource"><i class="el-icon-collection"></i><span>数据源管理</span></el-menu-item>
-          <el-menu-item index="/sync/task"><i class="el-icon-pie-chart"></i><span>同步任务</span></el-menu-item>
-          <el-menu-item index="/sync/dashboard"><i class="el-icon-odometer"></i><span>任务大盘</span></el-menu-item>
-          <el-menu-item index="/sync/log"><i class="el-icon-document"></i><span>同步日志</span></el-menu-item>
-        </el-submenu>
-        <el-menu-item index="/sync/audit"><i class="el-icon-view"></i><span>审计日志</span></el-menu-item>
-        <el-submenu index="105">
-          <template slot="title"><i class="el-icon-setting"></i><span>系统管理</span></template>
-          <el-menu-item index="/system/user"><i class="el-icon-user"></i><span>用户管理</span></el-menu-item>
-          <el-menu-item index="/sync/license"><i class="el-icon-key"></i><span>授权管理</span></el-menu-item>
-        </el-submenu>
+        <template v-for="m in menus">
+          <el-submenu v-if="m.children && m.children.length" :key="m.menuId" :index="'dir-' + m.menuId">
+            <template slot="title"><i :class="iconOf(m)" /><span>{{ m.menuName }}</span></template>
+            <el-menu-item v-for="c in m.children" :key="c.menuId" :index="c.path">
+              <i :class="iconOf(c)" /><span>{{ c.menuName }}</span>
+            </el-menu-item>
+          </el-submenu>
+          <el-menu-item v-else :key="m.menuId" :index="m.path">
+            <i :class="iconOf(m)" /><span>{{ m.menuName }}</span>
+          </el-menu-item>
+        </template>
       </el-menu>
     </el-aside>
 
@@ -70,16 +64,33 @@
 
 <script>
 export default {
-  data () { return { user: {}, theme: 'light' } },
+  data () { return { user: {}, theme: 'light', menuLoading: false } },
   computed: {
-    crumb () { return this.$route.meta?.title || '' }
+    crumb () { return this.$route.meta?.title || '' },
+    /* 侧边栏菜单: 来自后端(按权限过滤后的菜单树) */
+    menus () { return this.$store.state.menus || [] }
   },
   mounted () {
     this.user = this.$store.state.user || {}
+    this.loadMenus()
     // 从 App.vue 暴露的 __datamoveTheme 读取已应用的主题, 让按钮图标对应当前状态
     if (window.__datamoveTheme) this.theme = window.__datamoveTheme.get()
   },
   methods: {
+    async loadMenus () {
+      // 通常路由守卫已经加载过(直接命中缓存), 这里兜底直接刷新/首次进入的场景
+      if (this.menus.length) return
+      this.menuLoading = true
+      try { await this.$store.dispatch('loadMenus') } catch (e) { /* 失败保持空菜单, 不阻塞页面 */ }
+      this.menuLoading = false
+    },
+    /**
+     * 菜单图标: sys_menu.icon 里既有 element 的 el-icon-*, 也有早期 RuoYi 的自定义名(guide/dict/build...),
+     * 后者在当前前端没有对应的 svg 图标, 统一降级成一个通用图标, 避免渲染成空白
+     */
+    iconOf (m) {
+      return (m.icon && m.icon.indexOf('el-icon-') === 0) ? m.icon : 'el-icon-menu'
+    },
     onCmd (cmd) {
       if (cmd === 'logout') this.logout()
       if (cmd === 'profile') this.$router.push('/profile')

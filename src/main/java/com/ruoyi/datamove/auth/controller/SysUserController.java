@@ -7,16 +7,19 @@ import com.ruoyi.common.core.domain.R;
 import com.ruoyi.datamove.auth.domain.SysUser;
 import com.ruoyi.datamove.auth.mapper.SysUserMapper;
 import com.ruoyi.datamove.auth.service.IAuthService;
+import com.ruoyi.datamove.auth.service.SysPermissionService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
 import java.util.Date;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Api(tags = "用户管理")
 @RestController
@@ -32,6 +35,9 @@ public class SysUserController {
     @Autowired
     private PasswordEncoder passwordEncoder;
 
+    @Autowired
+    private SysPermissionService permissionService;
+
     @ApiOperation("分页查询")
     @GetMapping("/page")
     public R<PageResult<SysUser>> page(@RequestParam(defaultValue = "1") int pageNum,
@@ -46,6 +52,12 @@ public class SysUserController {
         Page<SysUser> result = userMapper.selectPage(page, wrapper);
         // 不回显密码
         result.getRecords().forEach(u -> u.setPassword(null));
+        // 角色: 一次批量查完再回填, 避免每行一次查询
+        List<Long> ids = result.getRecords().stream().map(SysUser::getUserId).collect(Collectors.toList());
+        Map<Long, List<String>> roleNames = permissionService.roleNamesOfUsers(ids);
+        for (SysUser u : result.getRecords()) {
+            u.setRoleNames(roleNames.getOrDefault(u.getUserId(), Collections.emptyList()));
+        }
         return R.ok(PageResult.of(result.getRecords(), result.getTotal()));
     }
 
@@ -62,6 +74,8 @@ public class SysUserController {
         user.setCreateTime(new Date());
         user.setUpdateTime(new Date());
         userMapper.insert(user);
+        // roleIds 是前端跟着表单一起提交的角色选择, 不传表示不动授权
+        if (user.getRoleIds() != null) permissionService.assignRoles(user.getUserId(), user.getRoleIds());
         return R.ok(user.getUserId());
     }
 
@@ -75,6 +89,7 @@ public class SysUserController {
         }
         user.setUpdateTime(new Date());
         userMapper.updateById(user);
+        if (user.getRoleIds() != null) permissionService.assignRoles(user.getUserId(), user.getRoleIds());
         return R.ok();
     }
 
@@ -87,6 +102,9 @@ public class SysUserController {
             u.setDelFlag("1");
             u.setUpdateTime(new Date());
             userMapper.updateById(u);
+            // 删除的是逻辑删, 但角色关联必须物理清掉: 否则会留下孤儿关联,
+            // 角色管理里会一直提示「该角色已分配给 N 个用户」而删不掉
+            permissionService.assignRoles(userId, Collections.emptyList());
         }
         return R.ok();
     }
@@ -96,6 +114,19 @@ public class SysUserController {
     public R<Void> resetPassword(@PathVariable Long userId, @RequestBody(required = false) Map<String, String> body) {
         String pwd = body == null ? "123456" : body.getOrDefault("password", "123456");
         authService.resetPassword(userId, pwd);
+        return R.ok();
+    }
+
+    @ApiOperation("查询用户已分配的角色ID (授权弹窗回填)")
+    @GetMapping("/{userId}/roles")
+    public R<List<Long>> listUserRoles(@PathVariable Long userId) {
+        return R.ok(permissionService.listRoleIdsOfUser(userId));
+    }
+
+    @ApiOperation("给用户授权 (全量覆盖: 传空列表即取消全部角色)")
+    @PutMapping("/{userId}/roles")
+    public R<Void> assignUserRoles(@PathVariable Long userId, @RequestBody(required = false) List<Long> roleIds) {
+        permissionService.assignRoles(userId, roleIds);
         return R.ok();
     }
 

@@ -36,6 +36,25 @@ Vue.prototype.$getToken = getToken
 Vue.prototype.$setToken = setToken
 Vue.prototype.$removeToken = removeToken
 
+/**
+ * 按钮级权限判断: v-if="$hasPerm('system:user:grant')"
+ *
+ * 权限来源是登录接口返回的 permissions (Vuex store.permissions), 即「登录那一刻的快照」:
+ *  - 后端真正鉴权用 JwtAuthenticationFilter 每次请求实时算的权限, 改授权立即生效
+ *  - 前端按钮显隐依赖登录快照, 所以改完自己的权限要重新登录才刷新按钮
+ * 没有权限标识(perm 为空)时视为「不做限制」, 避免历史页面漏配 perms 就全隐藏。
+ */
+Vue.prototype.$hasPerm = function (perm) {
+  if (!perm) return true
+  const perms = store.state.permissions || []
+  return perms.indexOf('*:*:*') !== -1 || perms.indexOf(perm) !== -1
+}
+Vue.prototype.$hasRole = function (role) {
+  if (!role) return true
+  const roles = store.state.roles || []
+  return roles.indexOf('admin') !== -1 || roles.indexOf(role) !== -1
+}
+
 Vue.config.productionTip = false
 
 /**

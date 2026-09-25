@@ -8,6 +8,7 @@ import com.ruoyi.datamove.auth.mapper.SysUserMapper;
 import com.ruoyi.datamove.auth.service.EmailCodeService;
 import com.ruoyi.datamove.auth.service.IAuthService;
 import com.ruoyi.datamove.auth.service.SmsService;
+import com.ruoyi.datamove.auth.service.SysPermissionService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -16,6 +17,7 @@ import org.springframework.stereotype.Service;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 @RequiredArgsConstructor
@@ -25,6 +27,7 @@ public class AuthServiceImpl implements IAuthService {
     private final PasswordEncoder passwordEncoder;
     private final SmsService smsService;
     private final EmailCodeService emailCodeService;
+    private final SysPermissionService permissionService;
 
     @Value("${token.secret}")
     private String secret;
@@ -96,17 +99,26 @@ public class AuthServiceImpl implements IAuthService {
         userMapper.updateById(user);
     }
 
-    /** 抽公共: 账号密码 / 短信两种登录方式共用 */
+    /**
+     * 抽公共: 账号密码 / 短信 / 邮箱三种登录方式共用
+     *
+     * <p>角色与权限从 sys_user_role -> sys_role -> sys_role_menu -> sys_menu.perms 实时算出,
+     * 不再写死 admin / *:*:* —— 否则用户管理里配的授权不生效。
+     * 这里返回给前端的是「登录那一刻」的快照, 用于按钮级显隐;
+     * 后端真正的鉴权依据是 JwtAuthenticationFilter 每次请求重算的权限。
+     */
     private Map<String, Object> buildLoginResult(SysUser user) {
         String token = JwtUtils.generate(user.getUserId(), user.getUserName(), secret, expireTime);
+        Set<String> roles = permissionService.roleKeysOfUser(user.getUserId());
+        Set<String> permissions = permissionService.permissionsOfUser(user.getUserId(), roles);
         Map<String, Object> res = new HashMap<>();
         res.put("token", token);
         res.put("userId", user.getUserId());
         res.put("userName", user.getUserName());
         res.put("nickName", user.getNickName());
         res.put("expireIn", expireTime);
-        res.put("roles", Collections.singletonList("admin"));
-        res.put("permissions", Collections.singletonList("*:*:*"));
+        res.put("roles", roles);
+        res.put("permissions", permissions);
         return res;
     }
 }
