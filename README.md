@@ -30,6 +30,7 @@
 
 | 文档 | 适合谁 |
 |---|---|
+| [GUIDE.md](GUIDE.md) | **新手操作人员, 第一次用不知道点哪里** — 页面地图 + 五步上手 + 场景手册 + 名词表 + FAQ |
 | [QUICKSTART.md](QUICKSTART.md) | **第一次接触, 想 5 分钟跑起来** — 含同类工具对比表 + 不适用场景 |
 | [LICENSING.md](LICENSING.md) | 想了解"哪些代码开源 / 哪些是商业付费 / 当前 LicenseService 怎么配"的人 |
 | 本 README | 完整功能说明 + 部署 + 高级用法 |

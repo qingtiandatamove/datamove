@@ -113,6 +113,7 @@ A: 99% 是 Canal 的 `instance.filter.regex` 与任务实际源库/表不匹配,
 
 ## 下一步
 
+- **不熟悉系统页面, 想知道每一步点什么** → [GUIDE.md](GUIDE.md) 新手引导
 - 看完整功能说明 → [README.md](README.md)
 - 了解授权模式与开源边界 → [LICENSING.md](LICENSING.md)
 - 自己改代码: 跑 `./mvnw test` 看现有单测骨架
