@@ -4,8 +4,6 @@
 
 **GitHub**: <https://github.com/qingtiandatamove/datamove.git>
 
-**Gitee**: <https://gitee.com/qingtian2023/datamove.git>
-
 ## 项目亮点
 
 | 亮点 | 说明 |
