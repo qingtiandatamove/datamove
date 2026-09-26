@@ -11,6 +11,7 @@
 | 零侵入增量同步 | 基于 Canal 订阅源库 binlog ROW 模式，**不写源库、不加触发器** |
 | 可视化零代码 | 页面点点选选即可跑任务，替代 DataX / Canal 的命令行与 JSON |
 | 四步新建向导 | 「新建任务」走 **选源 → 选目标 → 选模式 → 字段映射** 四步向导：同步方式做成卡片选，目标表缺失自动提示先建表，字段映射支持一键自动配对同名列，批次/分片/告警等高级参数默认收起 |
+| AI 配置助手 | 用一句话说人话就能配任务（例："每天凌晨2点把 demo 的 orders 全量同步到 demo1，排除 password 字段"），大模型直接解析出任务草稿 —— 源/目标库、表、同步模式、CRON、分批分片、字段掩码等一次填好，并**逐字段给出解析依据 + 风险提示**，确认后一键建任务；已有任务也能用"把同步时间改成每小时 / 加上分片 4"这类话直接改（先预览差异再落库）。支持 DeepSeek / 通义千问 / 火山方舟 / 智谱 / 本地 Ollama 等任一 OpenAI 兼容服务，**没配 API Key 时自动降级本地规则解析**，零配置也不影响使用，配置见 [5.9](#59-ai-任务配置助手---用一句话建任务--改任务) |
 | 迁移模板市场 | 内置 6 个场景模板（全量迁移 / 全量+增量不停机 / 业务→测试 / 业务→数仓 T+1 / 大表并行 / 敏感字段排除），**只填源库·目标库·表名即可一键套用出任务**；套用的仍是普通任务，参数随便改，详见 [5.8](#58-迁移模板市场---模板中心) |
 | 数据校验 + 一键修复 | 源/目标双游标流式归并，定位到行/字段差异，一键补 INSERT / 修 UPDATE（**不删目标库数据**） |
 | 断点续传 + 幂等 | 每批 `INSERT ... ON DUPLICATE KEY UPDATE` 成功才推进断点，重跑不脏数据 |
@@ -316,6 +317,55 @@ datamove/
 - **权限**: `sync:template:list` 查看，`sync:template:apply` 套用（会创建任务），默认授予 admin；升级脚本 `sql/upgrade_20260926_template_market.sql`
 - **扩展**: 新增模板只需在 `TaskTemplateRegistry` 加一个方法并在构造函数注册，**不用建表、不用改前端**
 - **接口**: `GET /sync/template/list`、`GET /sync/template/{code}`、`POST /sync/template/{code}/apply`
+
+### 5.9 AI 任务配置助手 - 用一句话建任务 / 改任务
+- **它是什么**: 把「人话」翻译成任务配置 —— 输入一句需求，大模型直接给出可创建的任务草稿；**没配 API Key 时自动降级本地规则解析**，零配置也能用
+- **入口**: 顶部「数据集成中心」→「AI 配置助手」(`/sync/ai`)，排在「模板市场」后面
+- **能做什么**:
+  - **新建任务**: 一句话生成草稿（源/目标数据源、同步表、同步模式、ID/TIME 游标字段、批次、分片、CRON、忽略字段、脱敏字段、Canal 配置等），**逐字段给出「为什么这么填」的解释 + 风险提示**，确认后一键创建任务
+  - **改已有任务**: 选中任务后说「把同步时间改成每小时」「分片改成 4」这类话，先出**差异预览**（哪个字段 old → new），确认后才落库
+  - **状态自检**: 页面顶部直接显示当前引擎（如「火山方舟 / ep-xxxx」还是「本地规则解析」），配没配上、走的哪家一眼可见
+- **配置项** (全部支持环境变量，**不要把 Key 写死在配置文件里**):
+
+| 配置项 | 环境变量 | 默认值 | 说明 |
+| --- | --- | --- | --- |
+| `sync.ai.enabled` | `AI_ENABLED` | `true` | 总开关，`false` 时强制走本地规则解析 |
+| `sync.ai.provider` | `AI_PROVIDER` | 空 | 服务商简称，配了它 `api-url` / `model` 自动套用预设 |
+| `sync.ai.api-url` | `AI_API_URL` | DeepSeek 地址 | OpenAI 兼容的 `/chat/completions` 地址，手写的优先 |
+| `sync.ai.api-key` | `AI_API_KEY` | 空 | **留空即降级本地规则解析** |
+| `sync.ai.model` | `AI_MODEL` | `deepseek-chat` | 模型名（火山方舟填**接入点 ID** `ep-xxxx`） |
+| `sync.ai.timeout-ms` | `AI_TIMEOUT_MS` | `30000` | 超时时间，交互操作 30s 不出结果就不等了 |
+| `sync.ai.temperature` | `AI_TEMPERATURE` | `0.1` | 低温保证解析结果稳定 |
+
+- **服务商预设** (`AiProvider`，只写 `provider` 即可，`api-url` / `model` 自动带出):
+
+| provider | 服务商 | 默认 api-url | 默认 model |
+| --- | --- | --- | --- |
+| `deepseek` | DeepSeek | `https://api.deepseek.com/v1/chat/completions` | `deepseek-chat` |
+| `qwen` | 通义千问 | `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions` | `qwen-plus` |
+| `ark` | 火山方舟 | `https://ark.cn-beijing.volces.com/api/v3/chat/completions` | `doubao-pro-32k` |
+| `zhipu` | 智谱 GLM | `https://open.bigmodel.cn/api/paas/v4/chat/completions` | `glm-4-flash` |
+| `ollama` | 本地 Ollama | `http://127.0.0.1:11434/v1/chat/completions` | `qwen2.5` |
+| `custom` | 自定义 (OpenAI 兼容) | 自己填 | 自己填 |
+
+  > 火山方舟的 `model` 填控制台的**接入点 ID**（`ep-xxxxxxxx`）或 `doubao-pro-32k` 等模型名；本地 Ollama 不校验 Key，`api-key` 填个非空字符串即可。
+
+- **最小配置示例** (写在 `application-local.yml`，该文件已在 `.gitignore` 排除):
+
+```yaml
+sync:
+  ai:
+    provider: ark                      # 火山方舟
+    api-key: ${AI_API_KEY:}            # 建议环境变量注入, 不入库
+    model: ep-20260926115735-xvrsj     # 方舟控制台的接入点 ID
+```
+
+  也可以纯环境变量启动: `AI_PROVIDER=ark AI_API_KEY=xxx AI_MODEL=ep-xxxx ./mvnw spring-boot:run`
+
+- **降级机制**: 没配 Key / `enabled=false` / 调用失败（超时、网络不通、模型返回异常）**都不会中断功能**，自动退回 `AiRuleParser` 本地规则解析，页面提示会写明「当前为本地规则解析」及原因 —— AI 是加速器，不是单点故障
+- **网络**: AI 调用**直连、不走系统代理**（避免本机 SOCKS 代理没启动导致连不上）；若所在网络必须经代理出网，需自行调整 `AiChatClient`
+- **权限**: `sync:ai:parse` 解析、`sync:ai:apply` 建/改任务，默认授予 admin；助手**不建表**，升级脚本 `sql/upgrade_20260926_ai_assistant.sql` 只加菜单与按钮权限
+- **接口**: `GET /sync/ai/status`、`POST /sync/ai/parse`、`POST /sync/ai/apply`、`POST /sync/ai/modify`、`POST /sync/ai/modify/apply`
 
 ## 六、数据库表结构 - 对应文档 4
 
