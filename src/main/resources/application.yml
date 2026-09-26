@@ -87,6 +87,29 @@ sync:
   inner-secret: ${INNER_SECRET:CHANGE_ME_INNER_SECRET}
 
   # ----------------------------------------------------------------------------
+  # AI 任务配置助手 (OpenAI 兼容的 /chat/completions 协议)
+  #   配了 api-key → 走大模型解析; 没配 → 自动降级本地规则解析, 功能不中断。
+  #
+  #   最省事的接法: 只填 provider + api-key(+ model), api-url 会自动套预设。
+  #     provider: deepseek | qwen | ark(火山方舟) | zhipu | ollama | custom
+  #
+  #   手写 api-url / model 时以手写的为准(provider 只影响界面展示):
+  #     DeepSeek:    https://api.deepseek.com/v1/chat/completions                       model=deepseek-chat
+  #     通义千问:    https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions  model=qwen-plus
+  #     火山方舟:    https://ark.cn-beijing.volces.com/api/v3/chat/completions           model=接入点ID(ep-xxxx) 或 doubao-pro-32k
+  #     智谱 GLM:    https://open.bigmodel.cn/api/paas/v4/chat/completions               model=glm-4-flash
+  #     本地 Ollama: http://127.0.0.1:11434/v1/chat/completions                          model=qwen2.5
+  # ----------------------------------------------------------------------------
+  ai:
+    enabled: ${AI_ENABLED:true}
+    provider: ${AI_PROVIDER:}
+    api-url: ${AI_API_URL:https://api.deepseek.com/v1/chat/completions}
+    api-key: ${AI_API_KEY:}
+    model: ${AI_MODEL:deepseek-chat}
+    timeout-ms: ${AI_TIMEOUT_MS:30000}
+    temperature: ${AI_TEMPERATURE:0.1}
+
+  # ----------------------------------------------------------------------------
   # 邮件告警 / 邮箱验证码登录 (共用 SMTP 配置)
   #   enabled=false 时, MailUtils.send 静默跳过 (验证码也会降级到本地日志)
   #   接入真实邮箱: MAIL_ENABLED=true + MAIL_HOST + MAIL_USERNAME + MAIL_PASSWORD

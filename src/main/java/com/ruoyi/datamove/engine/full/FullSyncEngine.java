@@ -64,6 +64,9 @@ public class FullSyncEngine {
     private static final Map<Long, SyncContext> RUNNING = new HashMap<>();
     private static final Set<Long> RUNNING_TASK = new HashSet<>();
 
+    /** 任务级限速器 (key=taskId): 每次启动重建, 分片线程共享同一个, 保证整任务不超过设定速率 */
+    private static final Map<Long, RateLimiter> RATE_LIMITERS = new HashMap<>();
+
     private static final String DATE_FMT = "yyyy-MM-dd HH:mm:ss";
 
     /* ============================================================
@@ -128,6 +131,11 @@ public class FullSyncEngine {
         TaskMetrics metrics = metricsRegistry.ensure(taskId,
                 task.getBatchSize() == null || task.getBatchSize() <= 0 ? 1000 : task.getBatchSize());
         metrics.activate(-1L, progress.getSuccessRows() == null ? 0L : progress.getSuccessRows());
+
+        // 限速器按次运行重建: 分片并行时所有分片共享, 合计速率不超过配置值
+        synchronized (RATE_LIMITERS) {
+            RATE_LIMITERS.put(taskId, new RateLimiter(task.getRateLimit()));
+        }
 
         SyncContext ctx = SyncContext.builder()
                 .task(task)
@@ -239,6 +247,9 @@ public class FullSyncEngine {
 
         RUNNING_TASK.remove(taskId);
         RUNNING.remove(taskId);
+        synchronized (RATE_LIMITERS) {
+            RATE_LIMITERS.remove(taskId);
+        }
 
         // 运行历史: 立即收口(线程内收口幂等, 重复调用不会覆盖已结束的记录)
         runService.finishRunning(taskId, SyncType.STATUS_STOP, null);
@@ -306,6 +317,9 @@ public class FullSyncEngine {
             }
             RUNNING_TASK.remove(task.getId());
             RUNNING.remove(task.getId());
+            synchronized (RATE_LIMITERS) {
+                RATE_LIMITERS.remove(task.getId());
+            }
         }
     }
 
@@ -438,7 +452,7 @@ public class FullSyncEngine {
             final long hi = ranges.get(k)[1];
             final String selectSql = "SELECT " + selectCols + " FROM `" + table
                     + "` WHERE `" + fSrcIdField + "` >= ? AND `" + fSrcIdField + "` <= ? AND `" + fSrcIdField
-                    + "` > ? ORDER BY `" + fSrcIdField + "` ASC LIMIT " + batchSize;
+                    + "` > ?" + whereExtra(task) + " ORDER BY `" + fSrcIdField + "` ASC LIMIT " + batchSize;
             Thread t = new Thread(() ->
                     runShard(ctx, progress, shardNo, lo, hi, selectSql, insertSql,
                             fSrcFields, fTgtFields, fSrcIdField, batchSize,
@@ -558,6 +572,8 @@ public class FullSyncEngine {
                         logService.writeLog(ctx, shardNo, batchNo, tag + prevId, tag + lastId, batchRows, total,
                                 System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
                     }
+                    // 限速: 分片共享同一个限速器, 合计速率不超过配置值
+                    throttle(task, batchRows);
                 } catch (BatchUpdateException bue) {
                     tgt.rollback();
                     if (metrics != null) metrics.finishBatch(0, readMs,
@@ -617,7 +633,8 @@ public class FullSyncEngine {
         String insertSql = buildInsertSql(table, tgtFields);
         // 部分字段映射: 断点字段(主键)即使未映射也要进 SELECT, 否则按列名取值会报 Column not found
         List<String> selectFields = withBreakpointFields(srcFields, srcIdField);
-        String selectSql = "SELECT " + joinBackticked(selectFields) + " FROM `" + table + "` WHERE `" + srcIdField + "` > ? ORDER BY `" + srcIdField + "` ASC LIMIT " + batchSize;
+        String selectSql = "SELECT " + joinBackticked(selectFields) + " FROM `" + table + "` WHERE `" + srcIdField
+                + "` > ?" + whereExtra(task) + " ORDER BY `" + srcIdField + "` ASC LIMIT " + batchSize;
 
         long lastId = progress.getLastSyncMaxId() == null ? 0L : progress.getLastSyncMaxId();
         long totalRows = progress.getTotalRows() == null ? 0L : progress.getTotalRows();
@@ -700,6 +717,8 @@ public class FullSyncEngine {
                     logService.writeLog(ctx, batchNo, String.valueOf(lastId - batchRows + 1),
                             String.valueOf(lastId), batchRows, totalRows,
                             System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
+                    // 限速(行/秒)
+                    throttle(task, batchRows);
                 } catch (BatchUpdateException bue) {
                     tgt.rollback();
                     if (metrics != null) metrics.finishBatch(0, readMs,
@@ -752,7 +771,9 @@ public class FullSyncEngine {
         // key 排序: 时间 ASC, ID ASC, 用于同秒拆分
         // 部分字段映射: 断点字段(时间/主键)即使未映射也要进 SELECT, 否则按列名取值会报 Column not found
         List<String> selectFields = withBreakpointFields(srcFields, srcTimeField, srcIdField);
-        String selectSql = "SELECT " + joinBackticked(selectFields) + " FROM `" + table + "` WHERE `" + srcTimeField + "` > ? OR (`" + srcTimeField + "` = ? AND `" + srcIdField + "` > ?) ORDER BY `" + srcTimeField + "` ASC, `" + srcIdField + "` ASC LIMIT " + batchSize;
+        String selectSql = "SELECT " + joinBackticked(selectFields) + " FROM `" + table + "` WHERE (`" + srcTimeField
+                + "` > ? OR (`" + srcTimeField + "` = ? AND `" + srcIdField + "` > ?))" + whereExtra(task)
+                + " ORDER BY `" + srcTimeField + "` ASC, `" + srcIdField + "` ASC LIMIT " + batchSize;
 
         Date lastTime = progress.getLastSyncTime();
         Long lastIdInBatch = progress.getLastSyncMaxId();
@@ -864,6 +885,8 @@ public class FullSyncEngine {
                             lastTime == null ? "" : new SimpleDateFormat(DATE_FMT).format(lastTime),
                             "", batchRows, totalRows,
                             System.currentTimeMillis() - startMs, SyncType.LOG_SUCCESS, null);
+                    // 限速(行/秒)
+                    throttle(task, batchRows);
                 } catch (BatchUpdateException bue) {
                     tgt.rollback();
                     if (metrics != null) metrics.finishBatch(0, readMs,
@@ -907,7 +930,7 @@ public class FullSyncEngine {
         }
         if (table == null || table.isEmpty() || field == null || field.isEmpty()) return -1L;
 
-        String sql = "SELECT COUNT(*) FROM `" + table + "` WHERE `" + field + "` > ?";
+        String sql = "SELECT COUNT(*) FROM `" + table + "` WHERE (`" + field + "` > ?)" + whereExtra(task);
         try (Connection src = JdbcUtils.getConnection(ctx.getSource());
              PreparedStatement ps = src.prepareStatement(sql)) {
             if (byTime) {
@@ -925,6 +948,37 @@ public class FullSyncEngine {
             log.warn("[Sync] task[{}] 待同步行数估算失败, 大盘将不展示 ETA: {}",
                     task.getTaskName(), e.getMessage());
             return -1L;
+        }
+    }
+
+    /**
+     * 源表过滤条件片段: 直接拼在游标条件后面, 形如 ` AND (status=1)`。
+     * 内容来自用户在任务表单/AI 助手里填的 where_condition, 入库前已做安全校验(禁分号/注释/DDL)。
+     * 为空返回空串 —— 老任务零感知。
+     */
+    private static String whereExtra(SyncTask task) {
+        if (task == null || task.getWhereCondition() == null) return "";
+        String w = task.getWhereCondition().trim();
+        if (w.isEmpty()) return "";
+        return " AND (" + w + ")";
+    }
+
+    /**
+     * 限速: 按「本批次行数 / 目标速率」补休眠, 让整任务写入速率贴近 rate_limit(行/秒)。
+     * 粒度是批次而不是单行 —— 单行 sleep 会把大表同步拖成串行慢查询。
+     */
+    private void throttle(SyncTask task, int batchRows) {
+        RateLimiter limiter;
+        synchronized (RATE_LIMITERS) {
+            limiter = RATE_LIMITERS.get(task.getId());
+        }
+        if (limiter == null || batchRows <= 0) return;
+        long waitMs = limiter.pauseMillis(batchRows);
+        if (waitMs <= 0) return;
+        try {
+            Thread.sleep(Math.min(waitMs, 5_000L));
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
         }
     }
 
@@ -1084,5 +1138,36 @@ public class FullSyncEngine {
         task.setStatus(SyncType.STATUS_COMPLETED);
         taskMapper.updateById(task);
         log.info("[Sync] task[{}] completed", task.getTaskName());
+    }
+
+    /**
+     * 令牌桶的极简版: 以 1 秒为窗口记账, 累计行数超出应得配额就补休眠。
+     * 不追求精确(MySQL 往返本身有抖动), 目标是"别把源库/目标库打满"。
+     */
+    private static class RateLimiter {
+
+        private final long rowsPerSecond;
+        private long windowStart = System.currentTimeMillis();
+        private long windowRows = 0;
+
+        RateLimiter(Integer rate) {
+            this.rowsPerSecond = (rate == null || rate <= 0) ? 0 : rate;
+        }
+
+        /** 返回本次需要休眠的毫秒数: 0 = 不限速 */
+        synchronized long pauseMillis(int rows) {
+            if (rowsPerSecond <= 0) return 0;
+            long now = System.currentTimeMillis();
+            long elapsed = now - windowStart;
+            if (elapsed >= 1000) {
+                // 窗口过期重新计数: 上一窗口没跑满的速度不累计补偿, 避免"攒速度"后突刺
+                windowStart = now;
+                windowRows = 0;
+                elapsed = 0;
+            }
+            windowRows += rows;
+            long expectMs = windowRows * 1000L / rowsPerSecond;
+            return Math.max(0, expectMs - elapsed);
+        }
     }
 }

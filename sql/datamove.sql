@@ -145,6 +145,8 @@ CREATE TABLE `sync_task` (
   `shard_count`     int(11)       NOT NULL DEFAULT 1 COMMENT '并行分片数(1=串行, >1=按主键区间分片并行, 仅FULL+ID模式)',
   `ignore_fields`   varchar(500)  DEFAULT NULL COMMENT '数据校验忽略字段(逗号分隔, 比对时不比较这些列)',
   `overwrite_flag`  tinyint(1)    NOT NULL DEFAULT 0 COMMENT '是否覆盖数据(1=启动时清空目标表再全量同步,仅FULL任务)',
+  `where_condition` varchar(1000) DEFAULT NULL COMMENT '源表过滤条件(SQL WHERE 片段, 不带 WHERE 关键字, 如 status=1)',
+  `rate_limit`      int(11)       DEFAULT NULL COMMENT '写入限速(行/秒), 为空或<=0 表示不限速',
   `dingtalk_webhook` varchar(500) DEFAULT NULL COMMENT '钉钉告警Webhook',
   `alert_email`     varchar(500)  DEFAULT NULL COMMENT '告警邮箱,多个用英文逗号分隔',
   `status`          varchar(20)   NOT NULL DEFAULT 'STOP' COMMENT '任务状态(STOP/RUNNING/PAUSE/COMPLETED/FAILED)',

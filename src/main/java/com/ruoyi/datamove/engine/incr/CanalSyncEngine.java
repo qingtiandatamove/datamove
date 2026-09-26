@@ -447,7 +447,8 @@ public class CanalSyncEngine {
                                     && !schema.equalsIgnoreCase(src.getDbName())) continue;
                             if (!table.equalsIgnoreCase(tableName)) continue;
                             // DML 类型过滤: 任务只勾了部分类型时, 其余事件直接丢弃, 不污染下游
-                            if (!dmlAllowed.contains(type)) {
+                            // dmlAllowed 为 null 表示未配置过滤 = 全部放行
+                            if (dmlAllowed != null && !dmlAllowed.contains(type)) {
                                 filtered++;
                                 continue;
                             }

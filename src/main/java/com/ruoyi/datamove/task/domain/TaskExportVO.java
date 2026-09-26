@@ -35,6 +35,10 @@ public class TaskExportVO implements Serializable {
     private Integer shardCount;
     private String ignoreFields;
     private Integer overwriteFlag;
+    /** 源表过滤条件(SQL WHERE 片段) */
+    private String whereCondition;
+    /** 写入限速(行/秒) */
+    private Integer rateLimit;
     private String dingtalkWebhook;
     private String alertEmail;
     private String remark;

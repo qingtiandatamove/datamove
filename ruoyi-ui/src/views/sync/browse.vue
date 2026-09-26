@@ -329,15 +329,16 @@ export default {
       return pk ? pk.columnName : null
     },
     hasPk () { return !!this.pkColumn },
-    /* 表单校验规则: 必填字段 (错误内联显示在输入框下方) */
+    /* 表单校验规则: 必填字段 (错误内联显示在输入框下方)
+       坑: 规则里带 whitespace 会让 async-validator 不再用「仅必填」校验器, 而是走默认的
+       string 类型校验器 —— 数字输入框(el-input-number)的值是 number, 会被判成
+       "user_id is not a string" 而误报「必填项, 不能为空」。所以数字字段只保留 required。 */
     editRules () {
       const rules = {}
       for (const col of this.editCols) {
-        if (this.isRequired(col)) {
-          rules[col.columnName] = [
-            { required: true, whitespace: true, message: '必填项, 不能为空', trigger: 'blur' }
-          ]
-        }
+        if (!this.isRequired(col)) continue
+        const base = { required: true, message: '必填项, 不能为空', trigger: 'blur' }
+        rules[col.columnName] = [this.isNumber(col) ? base : Object.assign({ whitespace: true }, base)]
       }
       return rules
     },
@@ -408,14 +409,17 @@ export default {
     /* ---- CRUD ---- */
     onAdd () {
       this.editPk = null
-      // 预填数据库默认值 (如 status=1, score=0.00); 自增主键已由 editCols 过滤, id 由数据库生成
+      const cols = this.editCols
+      // 先把所有字段 key 建出来(值 null): Vue2 对"后来才新增的对象属性"不做响应式,
+      // 不预建 key 的话输入框的值可能不被表单接管, 保存时就漏了这个字段
       const form = {}
-      for (const col of this.editCols) {
-        if (col.defaultValue !== null && col.defaultValue !== undefined) {
-          // CURRENT_TIMESTAMP 之类表达式默认值不能预填进日期控件, 留空让数据库生成
-          if (this.isDateLike(col) && /CURRENT_TIMESTAMP|now\(\)/i.test(String(col.defaultValue))) continue
-          form[col.columnName] = this.isNumber(col) ? Number(col.defaultValue) : col.defaultValue
-        }
+      for (const col of cols) form[col.columnName] = null
+      // 再预填数据库默认值 (如 status=1, score=0.00); 自增主键已由 editCols 过滤, id 由数据库生成
+      for (const col of cols) {
+        if (col.defaultValue === null || col.defaultValue === undefined) continue
+        // CURRENT_TIMESTAMP 之类表达式默认值不能预填进日期控件, 留空让数据库生成
+        if (this.isDateLike(col) && /CURRENT_TIMESTAMP|now\(\)/i.test(String(col.defaultValue))) continue
+        form[col.columnName] = this.isNumber(col) ? Number(col.defaultValue) : col.defaultValue
       }
       this.editForm = form
       this.fieldErrors = {}

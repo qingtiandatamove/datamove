@@ -288,6 +288,20 @@
                 数据库自动维护的列 (update_time / ON UPDATE CURRENT_TIMESTAMP) 两边天然不同, 建议填上。
               </div>
             </el-form-item>
+            <!-- 源表过滤条件 + 写入限速: AI 助手也会生成这两项, 这里可以直接手改 -->
+            <el-form-item v-if="form.taskType !== 'DDL'" label="过滤条件">
+              <el-input v-model="form.whereCondition" placeholder="不带 WHERE 的 SQL 片段, 如 status=1 AND type='A'" />
+              <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                只同步满足条件的数据 (追加在游标条件后面); 留空 = 全表同步。<br/>
+                禁止分号/注释/DDL 语句, 建议条件里的字段有索引。
+              </div>
+            </el-form-item>
+            <el-form-item v-if="form.taskType !== 'DDL'" label="限速(行/秒)">
+              <el-input-number v-model="form.rateLimit" :min="0" :max="200000" />
+              <div style="color:#909399;font-size:12px;line-height:18px;margin-top:4px">
+                0 或留空 = 不限速; 设了值后引擎按批次节奏休眠控速, 用于降低对生产库/目标库的压力。
+              </div>
+            </el-form-item>
             <el-form-item label="钉钉告警"><el-input v-model="form.dingtalkWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx" /></el-form-item>
             <el-form-item label="邮件告警">
               <el-input v-model="form.alertEmail" placeholder="多个邮箱用英文逗号分隔, 如 ops@a.com,dev@b.com" />
@@ -547,6 +561,12 @@
                 </el-form-item>
                 <el-form-item v-if="form.taskType !== 'DDL'" label="校验忽略字段">
                   <el-input v-model="form.ignoreFields" placeholder="逗号分隔, 如 update_time,update_by" style="width:320px" />
+                </el-form-item>
+                <el-form-item v-if="form.taskType !== 'DDL'" label="过滤条件">
+                  <el-input v-model="form.whereCondition" placeholder="不带 WHERE 的 SQL 片段, 如 status=1" style="width:320px" />
+                </el-form-item>
+                <el-form-item v-if="form.taskType !== 'DDL'" label="限速(行/秒)">
+                  <el-input-number v-model="form.rateLimit" :min="0" :max="200000" />
                 </el-form-item>
                 <el-form-item label="钉钉告警">
                   <el-input v-model="form.dingtalkWebhook" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx" />
@@ -1279,6 +1299,7 @@ export default {
         taskName: '', sourceId: '', targetId: '', tableName: '',
         idField: 'id', timeField: 'update_time',
         batchSize: 1000, shardCount: 1, overwriteFlag: 0, ignoreFields: '',
+        whereCondition: '', rateLimit: 0,
         canalHost: '', canalPort: 11111, canalDestination: '',
         dingtalkWebhook: '', alertEmail: '', cronExpr: '', eventToken: ''
       }

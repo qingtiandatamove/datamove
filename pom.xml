@@ -25,7 +25,7 @@
         <ruoyi.version>4.8.1</ruoyi.version>
         <mybatisplus.version>3.5.5</mybatisplus.version>
         <mysql.version>8.0.33</mysql.version>
-        <canal.version>1.1.4</canal.version>
+        <canal.version>1.1.8</canal.version>
         <hutool.version>5.8.27</hutool.version>
         <fastjson2.version>2.0.43</fastjson2.version>
     </properties>

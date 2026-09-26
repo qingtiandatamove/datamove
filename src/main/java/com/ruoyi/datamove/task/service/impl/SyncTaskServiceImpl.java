@@ -40,11 +40,16 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Pattern;
 
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class SyncTaskServiceImpl implements ISyncTaskService {
+
+    /** 过滤条件黑名单: where_condition 会拼进 SQL, 这些词一律拒绝 */
+    private static final Pattern UNSAFE_WHERE = Pattern.compile(
+            "(?i).*(;|--|/\\*|\\*/|\\b(drop|delete|truncate|alter|create|grant|union|sleep|benchmark|information_schema|into\\s+outfile)\\b).*");
 
     private final SyncTaskMapper                  taskMapper;
     private final SyncTaskProgressMapper          progressMapper;
@@ -105,6 +110,9 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         if (exists > 0) throw new RuntimeException("任务名称已存在: " + t.getTaskName());
         // binlog DML 类型过滤: 归一化为大写逗号串 (非法 token 丢弃, 全非法 = null 不过滤)
         t.setBinlogDmlTypes(normalizeBinlogDmlTypes(t.getBinlogDmlTypes()));
+        // 过滤条件 + 限速: 入库前统一校验
+        t.setWhereCondition(normalizeWhereCondition(t.getWhereCondition()));
+        t.setRateLimit(normalizeRateLimit(t.getRateLimit()));
         // 调度方式: 校验 + 归一化 (CRON 必须带合法表达式, EVENT 自动生成触发令牌)
         normalizeTrigger(t);
         t.setStatus(SyncType.STATUS_STOP);
@@ -163,6 +171,9 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         db.setOverwriteFlag(t.getOverwriteFlag() == null ? 0 : t.getOverwriteFlag());
         // 数据校验忽略字段: 这里是逐字段白名单赋值, 漏一行配置就永远存不进去
         db.setIgnoreFields(t.getIgnoreFields());
+        // 源表过滤条件 + 写入限速 (AI 助手/高级设置而来, 入库前做安全与范围校验)
+        db.setWhereCondition(normalizeWhereCondition(t.getWhereCondition()));
+        db.setRateLimit(normalizeRateLimit(t.getRateLimit()));
         db.setDingtalkWebhook(t.getDingtalkWebhook());
         db.setAlertEmail(t.getAlertEmail());
         db.setCanalHost(t.getCanalHost());
@@ -249,6 +260,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         copy.setShardCount(src.getShardCount());
         copy.setIgnoreFields(src.getIgnoreFields());
         copy.setOverwriteFlag(src.getOverwriteFlag());
+        copy.setWhereCondition(src.getWhereCondition());
+        copy.setRateLimit(src.getRateLimit());
         copy.setDingtalkWebhook(src.getDingtalkWebhook());
         copy.setAlertEmail(src.getAlertEmail());
         copy.setCanalHost(src.getCanalHost());
@@ -319,6 +332,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         vo.setShardCount(task.getShardCount());
         vo.setIgnoreFields(task.getIgnoreFields());
         vo.setOverwriteFlag(task.getOverwriteFlag());
+        vo.setWhereCondition(task.getWhereCondition());
+        vo.setRateLimit(task.getRateLimit());
         vo.setDingtalkWebhook(task.getDingtalkWebhook());
         vo.setAlertEmail(task.getAlertEmail());
         vo.setRemark(task.getRemark());
@@ -388,6 +403,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         t.setShardCount(vo.getShardCount() == null ? 1 : vo.getShardCount());
         t.setIgnoreFields(vo.getIgnoreFields());
         t.setOverwriteFlag(vo.getOverwriteFlag() == null ? 0 : vo.getOverwriteFlag());
+        t.setWhereCondition(normalizeWhereCondition(vo.getWhereCondition()));
+        t.setRateLimit(normalizeRateLimit(vo.getRateLimit()));
         t.setDingtalkWebhook(vo.getDingtalkWebhook());
         t.setAlertEmail(vo.getAlertEmail());
         t.setCanalHost(vo.getCanalHost());
@@ -892,6 +909,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         c.setShardCount(src.getShardCount());
         c.setIgnoreFields(src.getIgnoreFields());
         c.setOverwriteFlag(src.getOverwriteFlag());
+        c.setWhereCondition(src.getWhereCondition());
+        c.setRateLimit(src.getRateLimit());
         c.setDingtalkWebhook(src.getDingtalkWebhook());
         c.setAlertEmail(src.getAlertEmail());
         c.setCanalHost(src.getCanalHost());
@@ -922,6 +941,27 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
         }
         if (keep.isEmpty() || keep.size() == 3) return null;
         return String.join(",", keep);
+    }
+
+    /**
+     * 过滤条件归一化 + 安全校验: 这段文本会被拼进 SELECT 的 WHERE 里,
+     * 分号/注释/DDL/DML 一律拒绝, 宁可报错也不给注入的机会。
+     */
+    private static String normalizeWhereCondition(String raw) {
+        if (raw == null || raw.trim().isEmpty()) return null;
+        String w = raw.trim().replaceAll("(?i)^where\\s+", "").replaceAll(";+\\s*$", "").trim();
+        if (w.isEmpty()) return null;
+        if (UNSAFE_WHERE.matcher(w).matches()) {
+            throw new RuntimeException("过滤条件不允许包含分号/注释/DDL/DML 语句: " + w);
+        }
+        // 只保留条件本身, 顺手去掉尾部的 "的数据/记录" 这类口语残留
+        return w.length() > 1000 ? w.substring(0, 1000) : w;
+    }
+
+    /** 限速归一化: 非法值/0 视为不限速 */
+    private static Integer normalizeRateLimit(Integer rate) {
+        if (rate == null || rate <= 0) return null;
+        return Math.min(rate, 200000);
     }
 
     /**

@@ -155,6 +155,18 @@ export function getTemplate (code) { return request({ url: `/sync/template/${cod
 /* 套用模板: 返回新任务ID */
 export function applyTemplate (code, data) { return request({ url: `/sync/template/${code}/apply`, method: 'post', data }) }
 
+/* ============ AI 任务配置助手 ============ */
+/* 状态: AI 是否启用(未配 api-key 时后端降级为本地规则解析) */
+export function aiStatus () { return request({ url: '/sync/ai/status', method: 'get' }) }
+/* 自然语言 → 任务配置草稿(含解释与风险提示), timeout 放大: 调大模型可能要十几秒 */
+export function aiParse (text) { return request({ url: '/sync/ai/parse', method: 'post', data: { text }, timeout: 60000 }) }
+/* 确认草稿 → 一键创建任务, 返回任务ID */
+export function aiApply (draft) { return request({ url: '/sync/ai/apply', method: 'post', data: draft }) }
+/* AI 修改任务: 预览差异(不落库) */
+export function aiModify (taskId, text) { return request({ url: '/sync/ai/modify', method: 'post', data: { taskId, text }, timeout: 60000 }) }
+/* AI 修改任务: 确认应用 */
+export function aiModifyApply (taskId, draft) { return request({ url: '/sync/ai/modify/apply', method: 'post', data: { taskId, draft } }) }
+
 /* ============ 告警中心 ============ */
 export function pageAlert (params) { return request({ url: '/sync/alert/page', method: 'get', params }) }
 export function alertStats () { return request({ url: '/sync/alert/stats', method: 'get' }) }

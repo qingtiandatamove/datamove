@@ -63,6 +63,16 @@ public class SyncTask extends BaseEntity implements Serializable {
     /** 是否覆盖数据: 1=启动时先清空目标表再全量同步 (仅 FULL 任务生效) */
     private Integer overwriteFlag;
 
+    /**
+     * 源表过滤条件: 不带 WHERE 关键字的 SQL 片段, 如 status=1 AND type='A'。
+     * 同步时会以 AND (...) 追加到游标条件后面, 只搬满足条件的数据。
+     * 为空 = 全表同步(老任务零感知)。
+     */
+    private String whereCondition;
+
+    /** 写入限速(行/秒): 为空或 <=0 表示不限速; 引擎按批次节奏休眠控速 */
+    private Integer rateLimit;
+
     private String dingtalkWebhook;
 
     /** 告警邮箱, 多个用英文逗号分隔; 为空则不发送邮件告警 */
