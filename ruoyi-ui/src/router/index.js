@@ -27,6 +27,7 @@ const routes = [
       { path: 'sync/license',     component: () => import('@/views/sync/license.vue'),    meta: { title: '授权管理' } },
       { path: 'sync/audit',       component: () => import('@/views/sync/audit.vue'),       meta: { title: '审计日志' } },
       { path: 'sync/alert',       component: () => import('@/views/sync/alert.vue'),       meta: { title: '告警中心' } },
+      { path: 'sync/template',    component: () => import('@/views/sync/template.vue'),    meta: { title: '模板市场' } },
       { path: 'system/user',      component: () => import('@/views/system/user.vue'),     meta: { title: '用户管理' } },
       { path: 'system/role',      component: () => import('@/views/system/role.vue'),     meta: { title: '角色管理' } },
       { path: 'profile',          component: () => import('@/views/profile.vue'),         meta: { title: '我的' } }

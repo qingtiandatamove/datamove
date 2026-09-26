@@ -149,6 +149,12 @@ export function getRoleMenus (id) { return request({ url: `/system/role/${id}/me
 /* menuIds 为空数组表示取消该角色的全部权限 */
 export function saveRoleMenus (id, menuIds) { return request({ url: `/system/role/${id}/menus`, method: 'put', data: menuIds || [] }) }
 
+/* ============ 迁移任务模板市场 ============ */
+export function listTemplates () { return request({ url: '/sync/template/list', method: 'get' }) }
+export function getTemplate (code) { return request({ url: `/sync/template/${code}`, method: 'get' }) }
+/* 套用模板: 返回新任务ID */
+export function applyTemplate (code, data) { return request({ url: `/sync/template/${code}/apply`, method: 'post', data }) }
+
 /* ============ 告警中心 ============ */
 export function pageAlert (params) { return request({ url: '/sync/alert/page', method: 'get', params }) }
 export function alertStats () { return request({ url: '/sync/alert/stats', method: 'get' }) }
