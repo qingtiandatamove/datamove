@@ -43,61 +43,71 @@ html.theme-dark .el-card__body { background-color: var(--bg-card); color: var(--
  * 2.13.2 单元格 class 是 column.id / column.order / is-leaf / is-sortable 等,
  * 所以必须用裸标签 th / td 选择器, 必要时把 `.el-table__cell` 也带上兼容未来升级。
  */
-html.theme-dark .el-table {
-  background-color: var(--bg-card) !important;
-  color: var(--color-text-primary);
+/* ----------------------------------------------------------------------------
+ * 重要: 下面这些表格规则**故意不加 html.theme-dark 前缀**, 明暗两套取值放在 theme.scss。
+ *
+ * 原因: 表格的滚动容器会被浏览器提升为独立合成层。只改 <html> 的 class 时, 这些层的
+ *       绘制缓存不一定失效, 屏幕上会残留旧主题的行背景 —— 表现就是「切回亮色后表格几行
+ *       还是暗的, 必须刷新一下才正常」。
+ *       让规则始终匹配、只变 CSS 变量的值, 浏览器才会可靠地重新绘制这些层。
+ *
+ * 注意: 单元格背景一律挂在 tr 上, td 保持透明 —— 否则 td 的 !important 会压掉斑马纹/hover。
+ * -------------------------------------------------------------------------- */
+.el-table {
+  background-color: var(--el-table-bg) !important;
+  color: var(--el-table-td-color);
 }
-html.theme-dark .el-table::before,
-html.theme-dark .el-table::after {
-  background-color: var(--color-border);
+.el-table::before,
+.el-table::after {
+  background-color: var(--el-table-line);
 }
 
 /* tr / th / td 兜底: Element 默认 .el-table th,.el-table tr { background-color: #FFF } */
-html.theme-dark .el-table th,
-html.theme-dark .el-table tr,
-html.theme-dark .el-table tr.el-table__row {
-  background-color: var(--bg-card);
+.el-table th,
+.el-table tr,
+.el-table tr.el-table__row {
+  background-color: var(--el-table-row-bg) !important;
+  color: var(--el-table-td-color);
 }
-html.theme-dark .el-table th {
-  background-color: var(--bg-hover) !important;
-  color: var(--color-text-regular) !important;
-  border-bottom-color: var(--color-border);
-  font-weight: 500;
+.el-table th {
+  background-color: var(--el-table-th-bg) !important;
+  color: var(--el-table-th-color) !important;
+  border-bottom-color: var(--el-table-th-border);
+  font-weight: var(--el-table-th-weight);
 }
-html.theme-dark .el-table td,
-html.theme-dark .el-table td.el-table__cell {
-  background-color: var(--bg-card) !important;
-  border-bottom-color: var(--color-border-light) !important;
-  color: var(--color-text-primary) !important;
+.el-table td,
+.el-table td.el-table__cell {
+  border-bottom-color: var(--el-table-border) !important;
+  color: var(--el-table-td-color) !important;
 }
 
 /* header/footer wrapper 兜底 (Element 默认 #F5F7FA) */
-html.theme-dark .el-table__header-wrapper tbody td,
-html.theme-dark .el-table__header-wrapper tbody td.el-table__cell,
-html.theme-dark .el-table__footer-wrapper tbody td,
-html.theme-dark .el-table__footer-wrapper tbody td.el-table__cell {
-  background-color: var(--bg-hover) !important;
-  color: var(--color-text-regular) !important;
-  border-bottom-color: var(--color-border);
+.el-table__header-wrapper tbody td,
+.el-table__header-wrapper tbody td.el-table__cell,
+.el-table__footer-wrapper tbody td,
+.el-table__footer-wrapper tbody td.el-table__cell {
+  background-color: var(--el-table-head-cell-bg) !important;
+  color: var(--el-table-head-cell-color) !important;
+  border-bottom-color: var(--el-table-th-border);
 }
 
 /* ---------- hover 行 ---------- */
-html.theme-dark .el-table__body tr.el-table__row:hover > td,
-html.theme-dark .el-table__body tr.hover-row > td,
-html.theme-dark .el-table__body tr.hover-row.el-table__row--striped > td,
-html.theme-dark .el-table--enable-row-hover .el-table__body tr:hover > td,
-html.theme-dark .el-table__body tr.el-table__row:hover > td.el-table__cell,
-html.theme-dark .el-table__body tr.hover-row > td.el-table__cell {
-  background-color: var(--bg-hover) !important;
+.el-table__body tr.el-table__row:hover > td,
+.el-table__body tr.hover-row > td,
+.el-table__body tr.hover-row.el-table__row--striped > td,
+.el-table--enable-row-hover .el-table__body tr:hover > td,
+.el-table__body tr.el-table__row:hover > td.el-table__cell,
+.el-table__body tr.hover-row > td.el-table__cell {
+  background-color: var(--el-table-hover-bg) !important;
 }
 
 /* ---------- 选中行 current-row ---------- */
-html.theme-dark .el-table__body tr.current-row > td,
-html.theme-dark .el-table__body tr.hover-row.current-row > td,
-html.theme-dark .el-table__body tr.el-table__row--striped.current-row > td,
-html.theme-dark .el-table__body tr.hover-row.el-table__row--striped.current-row > td,
-html.theme-dark .el-table__body tr.current-row > td.el-table__cell {
-  background-color: rgba(64, 158, 255, .12) !important;
+.el-table__body tr.current-row > td,
+.el-table__body tr.hover-row.current-row > td,
+.el-table__body tr.el-table__row--striped.current-row > td,
+.el-table__body tr.hover-row.el-table__row--striped.current-row > td,
+.el-table__body tr.current-row > td.el-table__cell {
+  background-color: var(--el-table-current-bg) !important;
 }
 /* 第一格左边框 */
 html.theme-dark .el-table__body tr.current-row > td:first-child,
@@ -106,13 +116,13 @@ html.theme-dark .el-table__body tr.current-row > td.el-table__cell:first-child {
 }
 
 /* ---------- 斑马纹 ---------- */
-html.theme-dark .el-table--striped .el-table__body tr.el-table__row--striped > td,
-html.theme-dark .el-table--striped .el-table__body tr.el-table__row--striped > td.el-table__cell {
-  background-color: #232525 !important;
+.el-table--striped .el-table__body tr.el-table__row--striped > td,
+.el-table--striped .el-table__body tr.el-table__row--striped > td.el-table__cell {
+  background-color: var(--el-table-striped-bg) !important;
 }
-html.theme-dark .el-table--striped .el-table__body tr.el-table__row--striped.current-row > td,
-html.theme-dark .el-table--striped .el-table__body tr.el-table__row--striped.current-row > td.el-table__cell {
-  background-color: rgba(64, 158, 255, .12) !important;
+.el-table--striped .el-table__body tr.el-table__row--striped.current-row > td,
+.el-table--striped .el-table__body tr.el-table__row--striped.current-row > td.el-table__cell {
+  background-color: var(--el-table-current-bg) !important;
 }
 
 /* ---------- 排序箭头 ---------- */

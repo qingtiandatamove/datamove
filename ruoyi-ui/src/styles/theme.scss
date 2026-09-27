@@ -33,6 +33,25 @@
 
   /* Element UI 2.x 的 mix 层覆盖, 暗色下靠这些变量让组件感知 (不覆盖组件内部样式, 只暴露给我们的 scss 使用) */
   --el-color-primary: #409eff;
+
+  /* 表格专用 (el-table) —— 亮色取值与 Element 默认保持一致
+     为什么要单独抽变量: 表格的滚动容器会被提升为独立合成层, 只改 <html> 的 class 时
+     这些层的绘制缓存不一定失效, 屏幕会残留旧主题的行背景(刷新一下才正常)。
+     所以 element-dark.scss 里表格相关规则**不加 html.theme-dark 前缀**, 靠这里的变量值区分明暗。 */
+  --el-table-bg:                #ffffff;   /* .el-table 本体 */
+  --el-table-line:              #ebeef5;   /* ::before / ::after 分隔线 */
+  --el-table-row-bg:            #ffffff;   /* tr 兜底 (Element 默认 #FFF) */
+  --el-table-th-bg:             #ffffff;   /* 表头底 */
+  --el-table-th-color:          #909399;   /* 表头字 */
+  --el-table-th-border:         #ebeef5;   /* 表头下边框 */
+  --el-table-th-weight:         normal;    /* 表头字重 */
+  --el-table-td-color:          #606266;   /* 单元格文字 */
+  --el-table-border:            #ebeef5;   /* 单元格下边框 */
+  --el-table-head-cell-bg:      #ffffff;   /* header/footer wrapper 里的 td 兜底 */
+  --el-table-head-cell-color:   #909399;
+  --el-table-hover-bg:          #f5f7fa;   /* hover 行 (Element 默认) */
+  --el-table-striped-bg:        #fafafa;   /* 斑马纹 (Element 默认 #FAFAFA) */
+  --el-table-current-bg:        #ecf5ff;   /* 选中行 (Element 默认) */
 }
 
 /* 暗色主题: html.theme-dark 激活
@@ -58,4 +77,20 @@ html.theme-dark {
   --color-border:        #303133;
   --color-border-light:  #262727;
   --color-border-darker: #4c4d4f;
+
+  /* 表格专用 (el-table): 见 :root 里同名变量的说明 */
+  --el-table-bg:                var(--bg-card);
+  --el-table-line:              var(--color-border);
+  --el-table-row-bg:            var(--bg-card);
+  --el-table-th-bg:             var(--bg-hover);
+  --el-table-th-color:          var(--color-text-regular);
+  --el-table-th-border:         var(--color-border);
+  --el-table-th-weight:         500;
+  --el-table-td-color:          var(--color-text-primary);
+  --el-table-border:            var(--color-border-light);
+  --el-table-head-cell-bg:      var(--bg-hover);
+  --el-table-head-cell-color:   var(--color-text-regular);
+  --el-table-hover-bg:          var(--bg-hover);
+  --el-table-striped-bg:        #232525;
+  --el-table-current-bg:        rgba(64, 158, 255, .12);
 }

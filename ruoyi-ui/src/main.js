@@ -73,6 +73,28 @@ window.__datamoveTheme = {
   set (mode) {
     try { localStorage.setItem(this.THEME_KEY, mode) } catch (e) { /* 隐私模式静默 */ }
     document.documentElement.classList.toggle(this.DARK_CLASS, mode === 'dark')
+    this.repaint()
+  },
+  /**
+   * 主题切换后强制重绘。
+   *
+   * 坑: 表格的滚动容器会被浏览器提升为独立合成层, 而「祖先的样式变化」——无论是切 class
+   *     还是改 CSS 变量 —— 都不会让这些层的绘制缓存失效。表现就是切主题后表格里几行还是
+   *     旧主题的颜色(几行发暗 / 几行发白), 只有刷新页面才正常。
+   *
+   * 解法: 动「布局属性」, 而不是颜色、transform 这类绘制/合成属性。布局一变, 浏览器必须
+   *     重排, 依赖布局的绘制缓存随之作废并重建 —— 这是渲染管线里的硬保证, 优化跳不过去。
+   *     这里把容器 padding-bottom 挪 0.01px(肉眼不可见), 50ms 后还原。
+   */
+  repaint () {
+    const nodes = document.querySelectorAll(
+      '.el-table, .el-table__body-wrapper, .el-table__header-wrapper, .el-card, .el-tabs, .el-dialog')
+    if (!nodes.length) return
+    const list = Array.prototype.slice.call(nodes)
+    list.forEach(el => { el.style.paddingBottom = '0.01px' })
+    setTimeout(() => {
+      list.forEach(el => { el.style.paddingBottom = '' })
+    }, 50)
   },
   toggle () {
     const next = this.get() === 'dark' ? 'light' : 'dark'
