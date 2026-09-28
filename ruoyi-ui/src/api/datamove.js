@@ -125,6 +125,12 @@ export function pageAudit (params) { return request({ url: '/sync/audit/page', m
 /* 同一次请求的所有字段变更 (按 revision_id), 详情弹窗用 */
 export function auditRevision (revisionId) { return request({ url: `/sync/audit/revision/${revisionId}`, method: 'get' }) }
 
+/* ============ 登录日志 (谁在什么时候从哪个 IP 登录) ============ */
+/* 筛选: keyword(账号/昵称/IP/地点/提示) / status(0成功 1失败) / loginType / 时间范围 */
+export function pageLoginLog (params) { return request({ url: '/sync/login-log/page', method: 'get', params }) }
+export function deleteLoginLog (id) { return request({ url: `/sync/login-log/${id}`, method: 'delete' }) }
+export function clearLoginLog () { return request({ url: '/sync/login-log', method: 'delete' }) }
+
 /* ============ 用户管理 ============ */
 export function pageUser (params) { return request({ url: '/system/user/page', method: 'get', params }) }
 export function addUser (data) { return request({ url: '/system/user', method: 'post', data }) }

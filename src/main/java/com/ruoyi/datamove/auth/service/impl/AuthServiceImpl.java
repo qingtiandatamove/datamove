@@ -9,12 +9,15 @@ import com.ruoyi.datamove.auth.service.EmailCodeService;
 import com.ruoyi.datamove.auth.service.IAuthService;
 import com.ruoyi.datamove.auth.service.SmsService;
 import com.ruoyi.datamove.auth.service.SysPermissionService;
+import com.ruoyi.datamove.util.IpUtils;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.web.context.request.RequestContextHolder;
+import org.springframework.web.context.request.ServletRequestAttributes;
 
-import java.util.Collections;
+import java.util.Date;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
@@ -100,6 +103,23 @@ public class AuthServiceImpl implements IAuthService {
     }
 
     /**
+     * 回填 sys_user.login_ip / login_date —— 用户管理页能看到「谁最后一次什么时候从哪登录」。
+     * 这属于锦上添花的信息, 写失败不能影响登录。
+     */
+    private void touchLoginTrace(SysUser user) {
+        try {
+            ServletRequestAttributes attrs =
+                    (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            String ip = IpUtils.clientIp(attrs == null ? null : attrs.getRequest());
+            if (cn.hutool.core.util.StrUtil.isNotBlank(ip)) user.setLoginIp(ip);
+            user.setLoginDate(new Date());
+            userMapper.updateById(user);
+        } catch (Exception ignored) {
+            // 登录追踪失败不影响本次登录
+        }
+    }
+
+    /**
      * 抽公共: 账号密码 / 短信 / 邮箱三种登录方式共用
      *
      * <p>角色与权限从 sys_user_role -> sys_role -> sys_role_menu -> sys_menu.perms 实时算出,
@@ -109,6 +129,8 @@ public class AuthServiceImpl implements IAuthService {
      */
     private Map<String, Object> buildLoginResult(SysUser user) {
         String token = JwtUtils.generate(user.getUserId(), user.getUserName(), secret, expireTime);
+        // 回填最后登录 IP / 时间 (sys_user 本来就有这两列, 之前一直是空的)
+        touchLoginTrace(user);
         Set<String> roles = permissionService.roleKeysOfUser(user.getUserId());
         Set<String> permissions = permissionService.permissionsOfUser(user.getUserId(), roles);
         Map<String, Object> res = new HashMap<>();

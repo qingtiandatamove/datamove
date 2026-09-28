@@ -5,6 +5,7 @@ import com.ruoyi.common.core.domain.R;
 import com.ruoyi.datamove.auth.service.EmailCodeService;
 import com.ruoyi.datamove.auth.service.IAuthService;
 import com.ruoyi.datamove.auth.service.SmsService;
+import com.ruoyi.datamove.loginlog.service.LoginLogService;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -27,13 +28,38 @@ public class AuthController {
     @Autowired
     private EmailCodeService emailCodeService;
 
+    @Autowired
+    private LoginLogService loginLogService;
+
+    /**
+     * 登录日志: 成功与失败都要记 —— 失败记录是「有人在用别的密码试账号」的唯一线索。
+     * 记录失败(异常)绝不吞掉业务异常, 日志写完照原样往上抛。
+     */
+    private void logSuccess(String userName, Map<String, Object> res, String loginType, String msg) {
+        String name = userName != null ? userName : String.valueOf(res.get("userName"));
+        String nick = res.get("nickName") == null ? null : String.valueOf(res.get("nickName"));
+        loginLogService.record(name, nick, loginType, true, msg);
+    }
+
+    private String errMsg(Exception e) {
+        String m = e.getMessage();
+        return (m == null || m.isEmpty()) ? e.getClass().getSimpleName() : m;
+    }
+
     @ApiOperation("登录 - 返回 JWT Token")
     @PostMapping("/login")
     public R<Map<String, Object>> login(@RequestBody Map<String, String> body) {
         String username = body.get("username");
         String password = body.get("password");
         if (username == null || password == null) return R.fail("账号或密码不能为空");
-        return R.ok(authService.login(username, password));
+        try {
+            Map<String, Object> res = authService.login(username, password);
+            logSuccess(username, res, "PASSWORD", "账号密码登录成功");
+            return R.ok(res);
+        } catch (Exception e) {
+            loginLogService.record(username, null, "PASSWORD", false, errMsg(e));
+            throw e;
+        }
     }
 
     @ApiOperation("发送短信验证码 (登录用)")
@@ -53,7 +79,15 @@ public class AuthController {
         String phone = body.get("phone");
         String code = body.get("code");
         if (phone == null || code == null) return R.fail("手机号和验证码不能为空");
-        return R.ok(authService.loginByPhone(phone, code));
+        try {
+            Map<String, Object> res = authService.loginByPhone(phone, code);
+            logSuccess(null, res, "SMS", "短信验证码登录成功");
+            return R.ok(res);
+        } catch (Exception e) {
+            // 失败时账号未知, 记手机号本身, 便于回溯「哪个号在试」
+            loginLogService.record(phone, null, "SMS", false, errMsg(e));
+            throw e;
+        }
     }
 
     @ApiOperation("发送邮件验证码 (登录用)")
@@ -73,7 +107,14 @@ public class AuthController {
         String email = body.get("email");
         String code = body.get("code");
         if (email == null || code == null) return R.fail("邮箱和验证码不能为空");
-        return R.ok(authService.loginByEmail(email, code));
+        try {
+            Map<String, Object> res = authService.loginByEmail(email, code);
+            logSuccess(null, res, "EMAIL", "邮箱验证码登录成功");
+            return R.ok(res);
+        } catch (Exception e) {
+            loginLogService.record(email, null, "EMAIL", false, errMsg(e));
+            throw e;
+        }
     }
 
     @ApiOperation("获取当前登录用户信息")
