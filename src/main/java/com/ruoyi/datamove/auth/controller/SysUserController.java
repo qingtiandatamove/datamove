@@ -8,6 +8,7 @@ import com.ruoyi.datamove.auth.domain.SysUser;
 import com.ruoyi.datamove.auth.mapper.SysUserMapper;
 import com.ruoyi.datamove.auth.service.IAuthService;
 import com.ruoyi.datamove.auth.service.SysPermissionService;
+import com.ruoyi.common.security.Perms;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -43,6 +44,7 @@ public class SysUserController {
     public R<PageResult<SysUser>> page(@RequestParam(defaultValue = "1") int pageNum,
                                         @RequestParam(defaultValue = "10") int pageSize,
                                         @RequestParam(required = false) String keyword) {
+        Perms.require("system:user:list");
         Page<SysUser> page = new Page<>(pageNum, pageSize);
         QueryWrapper<SysUser> wrapper = new QueryWrapper<>();
         wrapper.eq("del_flag", "0");
@@ -64,6 +66,7 @@ public class SysUserController {
     @ApiOperation("新增用户")
     @PostMapping
     public R<Long> add(@RequestBody SysUser user) {
+        Perms.require("system:user:add");
         Long exists = userMapper.selectCount(
                 new QueryWrapper<SysUser>().eq("user_name", user.getUserName()).eq("del_flag", "0"));
         if (exists > 0) throw new RuntimeException("账号已存在");
@@ -82,6 +85,7 @@ public class SysUserController {
     @ApiOperation("修改用户")
     @PutMapping
     public R<Void> update(@RequestBody SysUser user) {
+        Perms.require("system:user:edit");
         if (user.getPassword() != null && !user.getPassword().isEmpty()) {
             user.setPassword(passwordEncoder.encode(user.getPassword()));
         } else {
@@ -96,7 +100,13 @@ public class SysUserController {
     @ApiOperation("删除用户")
     @DeleteMapping("/{userId}")
     public R<Void> remove(@PathVariable Long userId) {
-        if (userId == 1L) throw new RuntimeException("超级管理员不可删除");
+        Perms.require("system:user:remove");
+        if (userId == 1L) throw new RuntimeException("内置账号 admin 不可删除");
+        // 最后一个超管不允许删: 删完系统就没有能进用户/角色管理的人了
+        if (permissionService.isSuperAdmin(userId)
+                && permissionService.countActiveSuperAdmins(userId) == 0) {
+            throw new RuntimeException("系统必须保留至少一个超级管理员账号");
+        }
         SysUser u = userMapper.selectById(userId);
         if (u != null) {
             u.setDelFlag("1");
@@ -112,6 +122,7 @@ public class SysUserController {
     @ApiOperation("重置密码")
     @PostMapping("/{userId}/reset")
     public R<Void> resetPassword(@PathVariable Long userId, @RequestBody(required = false) Map<String, String> body) {
+        Perms.require("system:user:edit");
         String pwd = body == null ? "123456" : body.getOrDefault("password", "123456");
         authService.resetPassword(userId, pwd);
         return R.ok();
@@ -120,12 +131,14 @@ public class SysUserController {
     @ApiOperation("查询用户已分配的角色ID (授权弹窗回填)")
     @GetMapping("/{userId}/roles")
     public R<List<Long>> listUserRoles(@PathVariable Long userId) {
+        Perms.require("system:user:list", "system:user:grant");
         return R.ok(permissionService.listRoleIdsOfUser(userId));
     }
 
     @ApiOperation("给用户授权 (全量覆盖: 传空列表即取消全部角色)")
     @PutMapping("/{userId}/roles")
     public R<Void> assignUserRoles(@PathVariable Long userId, @RequestBody(required = false) List<Long> roleIds) {
+        Perms.require("system:user:grant");
         permissionService.assignRoles(userId, roleIds);
         return R.ok();
     }
@@ -133,6 +146,7 @@ public class SysUserController {
     @ApiOperation("启用/停用")
     @PostMapping("/{userId}/status")
     public R<Void> changeStatus(@PathVariable Long userId, @RequestParam String status) {
+        Perms.require("system:user:edit");
         SysUser u = userMapper.selectById(userId);
         if (u != null) {
             u.setStatus(status);

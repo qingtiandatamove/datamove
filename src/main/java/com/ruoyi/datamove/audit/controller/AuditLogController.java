@@ -2,6 +2,7 @@ package com.ruoyi.datamove.audit.controller;
 
 import com.ruoyi.common.core.domain.PageResult;
 import com.ruoyi.common.core.domain.R;
+import com.ruoyi.common.security.Perms;
 import com.ruoyi.datamove.audit.domain.AuditLog;
 import com.ruoyi.datamove.audit.service.AuditLogService;
 import io.swagger.annotations.Api;
@@ -33,6 +34,7 @@ public class AuditLogController {
                                        @RequestParam(required = false) String endTime,
                                        @RequestParam(required = false, defaultValue = "id") String orderByColumn,
                                        @RequestParam(required = false, defaultValue = "desc") String isAsc) {
+        Perms.require("sync:audit:list");
         return R.ok(auditLogService.page(keyword, opType, beginTime, endTime,
                 orderByColumn, isAsc, pageNum, pageSize));
     }
@@ -40,6 +42,7 @@ public class AuditLogController {
     @ApiOperation("查询同一次请求的所有字段变更 (详情用)")
     @GetMapping("/revision/{revisionId}")
     public R<List<AuditLog>> revision(@PathVariable Long revisionId) {
+        Perms.require("sync:audit:list");
         return R.ok(auditLogService.listByRevision(revisionId));
     }
 }

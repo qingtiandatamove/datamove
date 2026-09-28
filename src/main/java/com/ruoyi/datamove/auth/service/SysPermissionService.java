@@ -217,10 +217,11 @@ public class SysPermissionService {
             if (exists != target.size()) throw new RuntimeException("存在无效角色");
         }
 
-        // 内置 admin(userId=1) 必须保留 admin 角色: 否则系统会失去唯一可管理账号, 谁都进不去用户管理
-        if (userId != null && userId == 1L && !target.isEmpty()) {
-            boolean keepAdmin = target.stream().anyMatch(this::isAdminRole);
-            if (!keepAdmin) throw new RuntimeException("内置超级管理员必须保留 admin 角色");
+        // 系统必须至少保留一个超管账号: 否则谁都进不去用户/角色管理, 只能改库救场。
+        // 判定与 userId 无关 —— superadmin(user_id=2) 也是超管, 把它收走时同样会被拦下
+        boolean keepAdmin = target.stream().anyMatch(this::isAdminRole);
+        if (!keepAdmin && countActiveSuperAdmins(userId) == 0) {
+            throw new RuntimeException("系统必须保留至少一个超级管理员账号");
         }
 
         userRoleMapper.delete(new QueryWrapper<SysUserRole>().eq("user_id", userId));
@@ -230,6 +231,30 @@ public class SysPermissionService {
             ur.setRoleId(roleId);
             userRoleMapper.insert(ur);
         }
+    }
+
+    /** 该用户是否是超级管理员 (持有 role_key=admin 的角色) */
+    public boolean isSuperAdmin(Long userId) {
+        return userId != null && roleKeysOfUser(userId).contains(SUPER_ADMIN_ROLE);
+    }
+
+    /**
+     * 除 excludeUserId 之外, 还有几个正常状态的超管账号
+     *
+     * <p>用来兜底「最后一个超管不能被降级/删除」, 与具体 user_id 无关。
+     */
+    public long countActiveSuperAdmins(Long excludeUserId) {
+        SysRole adminRole = roleMapper.selectOne(new QueryWrapper<SysRole>()
+                .eq("role_key", SUPER_ADMIN_ROLE).eq("del_flag", "0"));
+        if (adminRole == null) return 0;
+        List<Long> userIds = userRoleMapper.selectList(
+                        new QueryWrapper<SysUserRole>().eq("role_id", adminRole.getRoleId()))
+                .stream().map(SysUserRole::getUserId).filter(Objects::nonNull).distinct()
+                .filter(id -> excludeUserId == null || !excludeUserId.equals(id))
+                .collect(Collectors.toList());
+        if (userIds.isEmpty()) return 0;
+        return userMapper.selectCount(new QueryWrapper<SysUser>()
+                .in("user_id", userIds).eq("del_flag", "0").eq("status", "0"));
     }
 
     private boolean isAdminRole(Long roleId) {

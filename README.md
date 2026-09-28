@@ -9,7 +9,8 @@
 ## 在线体验
 
 - **体验地址**：<http://8.140.200.84/>
-- **体验账号**：`admin` / `admin123`
+- **体验账号**：`superadmin` / `admin123`（超级管理员，全部功能）
+- **操作员账号**：`admin` / `admin123`（普通操作员，只有数据源、同步任务、同步日志、数据中心、SQL 工作台、任务大盘）
 
 > 演示环境跑在一台 2 核 1.7G 的云主机上（Ubuntu 22.04 + MySQL 8 + Redis 6 + Nginx），
 > 仅供**功能体验与效果查看**：请勿存放重要数据，演示库可能随时被清理。
@@ -72,7 +73,7 @@ mvn clean spring-boot:run
 cd ruoyi-ui && npm install && npm run dev
 ```
 
-打开 `http://localhost:80`，用 `admin / admin123` 登录（超级管理员）。后端 API `http://localhost:8080/`，Swagger `http://localhost:8080/swagger-ui/index.html`。
+打开 `http://localhost:80`，用 `superadmin / admin123` 登录（超级管理员）。后端 API `http://localhost:8080/`，Swagger `http://localhost:8080/swagger-ui/index.html`。
 
 首次登录后请立即：1. 修改默认密码　2. 添加源库 / 目标库　3. 创建第一个同步任务。
 

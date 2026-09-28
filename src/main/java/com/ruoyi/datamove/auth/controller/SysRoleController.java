@@ -9,6 +9,7 @@ import com.ruoyi.datamove.auth.domain.SysUserRole;
 import com.ruoyi.datamove.auth.mapper.SysRoleMapper;
 import com.ruoyi.datamove.auth.mapper.SysUserRoleMapper;
 import com.ruoyi.datamove.auth.service.SysPermissionService;
+import com.ruoyi.common.security.Perms;
 import io.swagger.annotations.Api;
 import io.swagger.annotations.ApiOperation;
 import lombok.RequiredArgsConstructor;
@@ -32,6 +33,7 @@ public class SysRoleController {
     public R<PageResult<SysRole>> page(@RequestParam(defaultValue = "1") int pageNum,
                                         @RequestParam(defaultValue = "10") int pageSize,
                                         @RequestParam(required = false) String keyword) {
+        Perms.require("system:role:list");
         Page<SysRole> page = new Page<>(pageNum, pageSize);
         QueryWrapper<SysRole> wrapper = new QueryWrapper<>();
         wrapper.eq("del_flag", "0");
@@ -45,12 +47,15 @@ public class SysRoleController {
     @ApiOperation("全部可用角色 (用户授权弹窗用)")
     @GetMapping("/list")
     public R<List<SysRole>> list() {
+        // 授权弹窗要拉角色列表, 有用户查看或授权权限即可
+        Perms.require("system:role:list", "system:user:list", "system:user:grant");
         return R.ok(permissionService.listRoles());
     }
 
     @ApiOperation("新增角色")
     @PostMapping
     public R<Long> add(@RequestBody SysRole role) {
+        Perms.require("system:role:add");
         if (role.getRoleName() == null || role.getRoleName().isEmpty()) throw new RuntimeException("角色名称不能为空");
         if (role.getRoleKey() == null || role.getRoleKey().isEmpty()) throw new RuntimeException("角色标识不能为空");
         long dup = roleMapper.selectCount(new QueryWrapper<SysRole>()
@@ -67,6 +72,7 @@ public class SysRoleController {
     @ApiOperation("修改角色")
     @PutMapping
     public R<Void> update(@RequestBody SysRole role) {
+        Perms.require("system:role:edit");
         SysRole old = roleMapper.selectById(role.getRoleId());
         if (old == null) throw new RuntimeException("角色不存在");
         // role_key 是权限判断依据(admin 靠它短路), 不允许改, 否则历史授权记录全部失效
@@ -79,6 +85,7 @@ public class SysRoleController {
     @ApiOperation("删除角色")
     @DeleteMapping("/{roleId}")
     public R<Void> remove(@PathVariable Long roleId) {
+        Perms.require("system:role:remove");
         SysRole role = roleMapper.selectById(roleId);
         if (role == null) throw new RuntimeException("角色不存在");
         if ("admin".equals(role.getRoleKey())) throw new RuntimeException("内置超级管理员角色不可删除");
@@ -94,6 +101,7 @@ public class SysRoleController {
     @ApiOperation("启用/停用角色")
     @PostMapping("/{roleId}/status")
     public R<Void> changeStatus(@PathVariable Long roleId, @RequestParam String status) {
+        Perms.require("system:role:edit");
         SysRole role = roleMapper.selectById(roleId);
         if (role == null) throw new RuntimeException("角色不存在");
         if ("1".equals(status) && "admin".equals(role.getRoleKey())) {
@@ -108,12 +116,14 @@ public class SysRoleController {
     @ApiOperation("查询角色已授权的菜单ID (权限树回填)")
     @GetMapping("/{roleId}/menus")
     public R<List<Long>> listRoleMenus(@PathVariable Long roleId) {
+        Perms.require("system:role:list", "system:role:grant");
         return R.ok(permissionService.listMenuIdsOfRole(roleId));
     }
 
     @ApiOperation("给角色授权菜单 (全量覆盖: 传空列表即取消全部权限)")
     @PutMapping("/{roleId}/menus")
     public R<Void> assignRoleMenus(@PathVariable Long roleId, @RequestBody(required = false) List<Long> menuIds) {
+        Perms.require("system:role:grant");
         permissionService.assignMenus(roleId, menuIds);
         return R.ok();
     }

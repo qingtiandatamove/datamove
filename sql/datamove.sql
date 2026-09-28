@@ -387,17 +387,20 @@ CREATE TABLE `sync_license` (
 
 -- ============== 初始化种子数据 ==============
 
--- 初始账号 admin / admin123
--- RuoYi 默认使用 BCrypt 加密,以下为 BCrypt 加密后的 admin123
+-- 初始账号: superadmin(超级管理员) / admin(普通操作员), 密码均为 admin123
+-- 密文为 BCrypt($2a$10$) 加密的 admin123, 部署后请立即改密
 INSERT INTO `sys_user` (`user_id`, `user_name`, `nick_name`, `user_type`, `password`, `status`, `create_time`)
-VALUES (1, 'admin', '超级管理员', '00', '$2a$10$7JB720NubH3eXX4.5Zc.fu8F.Nq3f3I9G6wT5p2v8eVaEOzWBH4L.', '0', NOW());
+VALUES
+(1, 'admin',      '普通操作员', '00', '$2a$10$hSo6QrcAyTx3q0r0mKhvxeG/WooO7dWK3G4E9k/SsNdjeBRv0zyXS', '0', NOW()),
+(2, 'superadmin', '超级管理员', '00', '$2a$10$hSo6QrcAyTx3q0r0mKhvxeG/WooO7dWK3G4E9k/SsNdjeBRv0zyXS', '0', NOW());
 
 INSERT INTO `sys_role` (`role_id`, `role_name`, `role_key`, `role_sort`, `status`, `create_time`)
 VALUES
 (1, '超级管理员', 'admin', 1, '0', NOW()),
 (2, '普通操作员', 'operator', 2, '0', NOW());
 
-INSERT INTO `sys_user_role` (`user_id`, `role_id`) VALUES (1, 1);
+-- admin -> 普通操作员, superadmin -> 超级管理员
+INSERT INTO `sys_user_role` (`user_id`, `role_id`) VALUES (1, 2), (2, 1);
 
 -- 菜单 (数据同步工具专用)
 INSERT INTO `sys_menu` (`menu_id`, `menu_name`, `parent_id`, `order_num`, `path`, `component`, `is_frame`, `menu_type`, `visible`, `status`, `perms`, `icon`)

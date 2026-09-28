@@ -88,12 +88,13 @@
       </div>
       <el-checkbox-group v-model="grantRoleIds">
         <div v-for="r in roles" :key="r.roleId" class="grant-item">
-          <el-checkbox :label="r.roleId" :disabled="grantUser.userId === 1 && r.roleKey === 'admin'">
+          <el-checkbox :label="r.roleId">
             {{ r.roleName }}
             <span class="grant-key">{{ r.roleKey }}</span>
           </el-checkbox>
         </div>
       </el-checkbox-group>
+      <div class="grant-tip">取消某用户的超级管理员角色后, 系统必须仍保留至少一个超管账号, 否则后端会拒绝保存。</div>
       <div class="grant-tip grant-warn" v-if="!roles.length">还没有可用角色, 请先在 sys_role 表中初始化角色数据。</div>
       <div slot="footer">
         <el-button @click="grantDialog=false">取消</el-button>
