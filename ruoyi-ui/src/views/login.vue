@@ -223,7 +223,7 @@ export default {
       theme: 'light',
       remember: true,
       loginMode: 'password',  // 'password' | 'email' | 'sms'
-      form: { username: 'superadmin', password: 'admin123' },
+      form: { username: 'admin', password: 'admin123' },
       emailForm: { email: '', code: '' },
       smsForm: { phone: '', code: '' },
       codeSending: false,
