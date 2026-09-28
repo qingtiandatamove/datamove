@@ -3,6 +3,7 @@ package com.ruoyi.datamove.browse.controller;
 import com.ruoyi.common.core.domain.R;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
+import com.ruoyi.datamove.engine.consts.ProtectedTable;
 import com.ruoyi.datamove.log.service.SqlLogService;
 import com.ruoyi.datamove.util.JdbcUtils;
 import io.swagger.annotations.Api;
@@ -126,6 +127,15 @@ public class SqlConsoleController {
 
         List<String> statements = splitStatements(sql);
         if (statements.isEmpty()) return R.fail("没有可执行的语句");
+        // 系统表保护: 执行前逐条体检, 任何改动 sys_*/sync_* 的语句直接拒绝 (只读不受影响)
+        for (String stmt : statements) {
+            String reject = ProtectedTable.checkStatement(stmt);
+            if (reject != null) {
+                sqlLogService.record(dsId, ds.getDatasourceName(), ds.getDbName(), SOURCE,
+                        sql, statements.size(), 0, 0, 0, "BLOCKED", reject);
+                return R.fail(reject);
+            }
+        }
         if (statements.size() > 20) {
             sqlLogService.record(dsId, ds.getDatasourceName(), ds.getDbName(), SOURCE,
                     sql, statements.size(), 0, 0, 0, "FAILED", "单次最多执行 20 条语句");

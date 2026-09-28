@@ -1,6 +1,7 @@
 package com.ruoyi.datamove.browse.controller;
 
 import com.ruoyi.common.core.domain.R;
+import com.ruoyi.datamove.engine.consts.ProtectedTable;
 import com.ruoyi.datamove.datasource.domain.SyncDatasource;
 import com.ruoyi.datamove.datasource.mapper.SyncDatasourceMapper;
 import com.ruoyi.datamove.util.JdbcUtils;
@@ -98,6 +99,7 @@ public class DataBrowseController {
     @PostMapping("/{dsId}/table/{table}")
     public R<Void> insert(@PathVariable Long dsId, @PathVariable String table,
                           @RequestBody Map<String, Object> values) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         Set<String> legalCols = legalColumns(ds, table);
         // 过滤: 只保留合法且用户填了值的列
@@ -128,6 +130,7 @@ public class DataBrowseController {
     @PutMapping("/{dsId}/table/{table}")
     public R<Void> update(@PathVariable Long dsId, @PathVariable String table,
                           @RequestBody Map<String, Map<String, Object>> body) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         Map<String, Object> pk = body.get("pk");      // {主键列: 旧值}
         Map<String, Object> values = body.get("values"); // {列: 新值}
@@ -170,6 +173,7 @@ public class DataBrowseController {
     @DeleteMapping("/{dsId}/table/{table}")
     public R<Void> delete(@PathVariable Long dsId, @PathVariable String table,
                           @RequestBody Map<String, Object> pk) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         if (pk == null || pk.isEmpty()) return R.fail("缺少主键定位条件");
         Set<String> legalCols = legalColumns(ds, table);
@@ -206,6 +210,7 @@ public class DataBrowseController {
     @PostMapping("/{dsId}/table/{table}/ddl/column")
     public R<Void> addColumn(@PathVariable Long dsId, @PathVariable String table,
                              @RequestBody Map<String, Object> body) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         checkTable(ds, table);
         String def = buildColumnDef(body);
@@ -223,6 +228,7 @@ public class DataBrowseController {
     @PutMapping("/{dsId}/table/{table}/ddl/column")
     public R<Void> modifyColumn(@PathVariable Long dsId, @PathVariable String table,
                                 @RequestBody Map<String, Object> body) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         checkTable(ds, table);
         String oldName = (String) body.get("oldColumnName");
@@ -246,6 +252,7 @@ public class DataBrowseController {
     @DeleteMapping("/{dsId}/table/{table}/ddl/column")
     public R<Void> dropColumn(@PathVariable Long dsId, @PathVariable String table,
                               @RequestBody Map<String, Object> body) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         checkTable(ds, table);
         String col = (String) body.get("columnName");
@@ -294,6 +301,7 @@ public class DataBrowseController {
     @PostMapping("/{dsId}/table/{table}/ddl/index")
     public R<Void> addIndex(@PathVariable Long dsId, @PathVariable String table,
                             @RequestBody Map<String, Object> body) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         Set<String> legal = legalColumns(ds, table);
         List<?> cols = (List<?>) body.get("columns");
@@ -324,6 +332,7 @@ public class DataBrowseController {
     @DeleteMapping("/{dsId}/table/{table}/ddl/index")
     public R<Void> dropIndex(@PathVariable Long dsId, @PathVariable String table,
                              @RequestBody Map<String, Object> body) {
+        if (ProtectedTable.isProtected(table)) return R.fail(ProtectedTable.guardMessage(table));
         SyncDatasource ds = mustGetDatasource(dsId);
         checkTable(ds, table);
         String name = (String) body.get("indexName");

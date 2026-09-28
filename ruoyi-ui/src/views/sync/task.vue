@@ -1014,7 +1014,7 @@ export default {
     targetDsLabel () { return this.dsLabel(this.form && this.form.targetId) },
     eventTriggerUrl () {
       if (!this.form || !this.form.eventToken) return ''
-      const base = process.env.NODE_ENV === 'production' ? window.location.origin : window.location.origin + '/dev-api'
+      const base = process.env.NODE_ENV === 'production' ? window.location.origin + '/prod-api' : window.location.origin + '/dev-api'
       return base + '/sync/task/event/' + this.form.eventToken
     },
     mappingHint () {

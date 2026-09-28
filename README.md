@@ -5,6 +5,15 @@
 **GitHub**: <https://github.com/qingtiandatamove/datamove>
 **Gitee**: <https://gitee.com/qingtian2023/datamove>
 
+## 在线体验
+
+- **体验地址**：<http://8.140.200.84/>
+- **体验账号**：`admin` / `admin123`
+
+> 演示环境跑在一台 2 核 1.7G 的云主机上（Ubuntu 22.04 + MySQL 8 + Redis 6 + Nginx），
+> 仅供**功能体验与效果查看**：请勿存放重要数据，演示库可能随时被清理。
+> 登录后建议先到「数据源管理」把示例数据源改成自己的库，再用「新建任务」向导跑一个同步。
+
 **一句话**：可视化零代码的 MySQL 同步工具 —— 页面点点选选就能跑任务，替代 DataX / Canal 的命令行与 JSON，自带断点续传、幂等同步、**数据校验与一键修复**。
 
 ## 项目亮点

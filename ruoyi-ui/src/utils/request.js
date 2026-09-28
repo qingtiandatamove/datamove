@@ -2,7 +2,7 @@ import axios from 'axios'
 import { Message, MessageBox } from 'element-ui'
 import { getToken, setToken, removeToken } from '@/utils/auth'
 
-const baseURL = process.env.NODE_ENV === 'production' ? '' : '/dev-api'
+const baseURL = process.env.NODE_ENV === 'production' ? '/prod-api' : '/dev-api'
 const service = axios.create({ baseURL, timeout: 30000 })
 
 /**

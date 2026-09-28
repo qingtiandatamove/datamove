@@ -41,7 +41,7 @@ export function useSqlFavorite (id) { return request({ url: `/sync/sql/favorite/
 export function pageSqlLog (params) { return request({ url: '/sync/sql/log/page', method: 'get', params }) }
 export function exportSqlLogUrl (params) {
   const qs = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-  return (process.env.NODE_ENV === 'production' ? '' : '/dev-api') + '/sync/sql/log/export?' + qs
+  return (process.env.NODE_ENV === 'production' ? '/prod-api' : '/dev-api') + '/sync/sql/log/export?' + qs
 }
 
 /* ============ 同步任务 ============ */
@@ -81,7 +81,7 @@ export function runTrend (params) { return request({ url: '/sync/task/run/trend'
 export function clearTaskRun (params) { return request({ url: '/sync/task/run/clear', method: 'delete', params }) }
 export function exportRunUrl (params) {
   const qs = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-  return (process.env.NODE_ENV === 'production' ? '' : '/dev-api') + '/sync/task/run/export?' + qs
+  return (process.env.NODE_ENV === 'production' ? '/prod-api' : '/dev-api') + '/sync/task/run/export?' + qs
 }
 
 /* 任务-字段映射 (源字段 -> 目标字段, FULL + INCR 都生效) */
@@ -108,7 +108,7 @@ export function pageLog (params) { return request({ url: '/sync/log/page', metho
 export function logSummary (params) { return request({ url: '/sync/log/summary', method: 'get', params }) }
 export function exportLogUrl (params) {
   const qs = Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '').map(([k, v]) => `${k}=${encodeURIComponent(v)}`).join('&')
-  return (process.env.NODE_ENV === 'production' ? '' : '/dev-api') + '/sync/log/export?' + qs
+  return (process.env.NODE_ENV === 'production' ? '/prod-api' : '/dev-api') + '/sync/log/export?' + qs
 }
 /* 按天聚合同步日志(首页趋势图) */
 export function logTrend (days) { return request({ url: '/sync/log/trend', method: 'get', params: { days } }) }

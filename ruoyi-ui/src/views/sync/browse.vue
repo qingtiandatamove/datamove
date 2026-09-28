@@ -30,9 +30,12 @@
         <el-tab-pane label="数据" name="data">
           <div style="margin-bottom:10px">
             <el-button size="small" type="primary" icon="el-icon-plus"
-              :disabled="!tableName" @click="onAdd">新增一行</el-button>
+              :disabled="!tableName || isSystemTable" @click="onAdd">新增一行</el-button>
           </div>
-          <el-alert v-if="tableName && !hasPk" type="warning" :closable="false" show-icon style="margin-bottom:10px"
+          <el-alert v-if="isSystemTable" type="error" :closable="false" show-icon style="margin-bottom:10px"
+            title="这是 DataMove 系统表, 只读"
+            description="为防止误删/误改导致系统不可用, 系统表不允许在数据中心修改; 需要维护请到对应的功能页面 (用户管理 / 角色管理 / 同步任务 ...)。" />
+          <el-alert v-else-if="tableName && !hasPk" type="warning" :closable="false" show-icon style="margin-bottom:10px"
             title="该表没有主键, 仅支持查看, 不支持编辑/删除" />
           <el-table :data="dataRows" border v-loading="dataLoading" size="small"
             ref="dataTable" @sort-change="onSortChange">
@@ -43,8 +46,8 @@
             </el-table-column>
             <el-table-column label="操作" width="140" fixed="right" class-name="op-col">
               <template slot-scope="s">
-                <el-button size="mini" type="primary" :disabled="!hasPk" @click="onEdit(s.row)">编辑</el-button>
-                <el-button size="mini" type="danger" :disabled="!hasPk" @click="onDel(s.row)">删除</el-button>
+                <el-button size="mini" type="primary" :disabled="!hasPk || isSystemTable" @click="onEdit(s.row)">编辑</el-button>
+                <el-button size="mini" type="danger" :disabled="!hasPk || isSystemTable" @click="onDel(s.row)">删除</el-button>
               </template>
             </el-table-column>
           </el-table>
@@ -55,11 +58,13 @@
 
         <!-- 表结构 -->
         <el-tab-pane label="表结构" name="struct">
+          <el-alert v-if="isSystemTable" type="error" :closable="false" show-icon style="margin-bottom:10px"
+            title="这是 DataMove 系统表, 表结构不允许修改" />
           <div style="margin-bottom:10px">
             <el-button size="small" type="primary" icon="el-icon-plus"
-              :disabled="!tableName" @click="onAddCol">新增字段</el-button>
+              :disabled="!tableName || isSystemTable" @click="onAddCol">新增字段</el-button>
             <el-button size="small" icon="el-icon-collection-tag"
-              :disabled="!tableName" @click="onManageIndex">索引管理</el-button>
+              :disabled="!tableName || isSystemTable" @click="onManageIndex">索引管理</el-button>
           </div>
           <el-table :data="structRows" border v-loading="structLoading" size="small"
             :row-class-name="({ row }) => row.__isNew ? 'new-col-row' : ''">
@@ -127,8 +132,8 @@
                   <el-button size="mini" @click="showNewCol = false">取消</el-button>
                 </template>
                 <template v-else>
-                  <el-button size="mini" type="primary" @click="onEditCol(s.row)">修改</el-button>
-                  <el-button size="mini" type="danger" @click="onDropCol(s.row)">删除</el-button>
+                  <el-button size="mini" type="primary" :disabled="isSystemTable" @click="onEditCol(s.row)">修改</el-button>
+                  <el-button size="mini" type="danger" :disabled="isSystemTable" @click="onDropCol(s.row)">删除</el-button>
                 </template>
               </template>
             </el-table-column>
@@ -263,7 +268,7 @@
         <el-table-column label="操作" width="80">
           <template slot-scope="s">
             <el-button v-if="s.row.indexName !== 'PRIMARY'" size="mini" type="danger"
-              @click="onDropIndex(s.row)">删除</el-button>
+              :disabled="isSystemTable" @click="onDropIndex(s.row)">删除</el-button>
             <span v-else style="color:#909399">-</span>
           </template>
         </el-table-column>
@@ -329,6 +334,14 @@ export default {
       return pk ? pk.columnName : null
     },
     hasPk () { return !!this.pkColumn },
+    /**
+     * 是否 DataMove 系统表 (sys_* / sync_*): 命中则只读 —— 与后端 ProtectedTable 保持一致的前缀规则,
+     * 前端只负责把按钮置灰 + 提示, 真正的拦截在后端 (绕过前端直接调接口一样会被拒)
+     */
+    isSystemTable () {
+      const t = (this.tableName || '').toLowerCase()
+      return t.startsWith('sys_') || t.startsWith('sync_')
+    },
     /* 表单校验规则: 必填字段 (错误内联显示在输入框下方)
        坑: 规则里带 whitespace 会让 async-validator 不再用「仅必填」校验器, 而是走默认的
        string 类型校验器 —— 数字输入框(el-input-number)的值是 number, 会被判成
