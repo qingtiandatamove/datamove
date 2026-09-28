@@ -123,7 +123,9 @@ CREATE TABLE `sync_datasource` (
   `create_time`     datetime     DEFAULT NULL COMMENT '创建时间',
   `update_by`       varchar(64)  DEFAULT '' COMMENT '更新者',
   `update_time`     datetime     DEFAULT NULL COMMENT '更新时间',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
+  KEY `idx_owner` (`owner_id`)
   UNIQUE KEY `uk_datasource_name` (`datasource_name`, `del_flag`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='数据源配置表';
 
@@ -163,10 +165,12 @@ CREATE TABLE `sync_task` (
   `create_time`     datetime      DEFAULT NULL COMMENT '创建时间',
   `update_by`       varchar(64)   DEFAULT '' COMMENT '更新者',
   `update_time`     datetime      DEFAULT NULL COMMENT '更新时间',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_name` (`task_name`, `del_flag`),
   UNIQUE KEY `uk_event_token` (`event_token`),
-  KEY `idx_status` (`status`)
+  KEY `idx_status` (`status`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB AUTO_INCREMENT=1 DEFAULT CHARSET=utf8mb4 COMMENT='同步任务表';
 
 -- 4.2.1 任务字段映射表 (源字段 -> 目标字段 一对一重命名, FULL/INCR 通用)
@@ -180,9 +184,11 @@ CREATE TABLE IF NOT EXISTS `sync_task_field_mapping` (
   `sort_no`      int(11)      NOT NULL DEFAULT 0 COMMENT '顺序 (SELECT/INSERT 列表顺序)',
   `create_time`  datetime     DEFAULT NULL,
   `update_time`  datetime     DEFAULT NULL,
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_task_src_f` (`task_id`, `source_field`),
-  KEY `idx_task_id` (`task_id`)
+  KEY `idx_task_id` (`task_id`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='同步任务字段映射表 - 源字段 -> 目标字段 一对一重命名';
 
 -- 4.3 任务断点进度表 (核心表,支撑断点续传)
@@ -202,7 +208,9 @@ CREATE TABLE `sync_task_progress` (
   `end_time`       datetime    DEFAULT NULL COMMENT '本次结束时间',
   `create_time`    datetime    DEFAULT NULL COMMENT '创建时间',
   `update_time`    datetime    DEFAULT NULL COMMENT '更新时间',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
+  KEY `idx_owner` (`owner_id`)
   UNIQUE KEY `uk_task_id` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务断点进度表';
 
@@ -225,10 +233,12 @@ CREATE TABLE `sync_task_log` (
   `error_msg`      text         COMMENT '异常信息',
   `content`        text         COMMENT '同步内容摘要(本批次变更数据)',
   `create_time`    datetime     DEFAULT NULL COMMENT '创建时间',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_task_id` (`task_id`),
   KEY `idx_create_time` (`create_time`),
-  KEY `idx_status` (`status`)
+  KEY `idx_status` (`status`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='同步日志表';
 
 -- 运行历史表 (每次启动任务写一条, 结束/失败/停止时回填结果, 大盘「运行历史」用)
@@ -255,10 +265,12 @@ CREATE TABLE `sync_task_run` (
   `error_msg`         text          COMMENT '异常信息',
   `create_time`       datetime      DEFAULT NULL,
   `update_time`       datetime      DEFAULT NULL,
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_task_id` (`task_id`),
   KEY `idx_start_time` (`start_time`),
-  KEY `idx_status` (`status`)
+  KEY `idx_status` (`status`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='任务运行历史表';
 
 -- 4.4.1 数据校验运行记录表 (同步完成后「校验数据」一次写一条, 记录差异统计与修复结果)
@@ -297,10 +309,12 @@ CREATE TABLE `sync_task_verify` (
   `repair_end_time`   datetime      DEFAULT NULL COMMENT '修复结束时间',
   `create_time`       datetime      DEFAULT NULL,
   `update_time`       datetime      DEFAULT NULL,
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_task_id` (`task_id`),
   KEY `idx_status` (`status`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_create_time` (`create_time`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据校验运行记录表';
 
 -- 4.4.2 数据校验差异明细表 (「一键同步缺失数据」的依据; 修复后回填 repair_status)
@@ -318,10 +332,12 @@ CREATE TABLE `sync_task_diff` (
   `repair_error`  varchar(1000) DEFAULT NULL COMMENT '修复失败原因',
   `repair_time`   datetime      DEFAULT NULL COMMENT '修复时间',
   `create_time`   datetime      DEFAULT NULL,
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_verify_id` (`verify_id`),
   KEY `idx_verify_type` (`verify_id`, `diff_type`),
-  KEY `idx_verify_repair` (`verify_id`, `repair_status`)
+  KEY `idx_verify_repair` (`verify_id`, `repair_status`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='数据校验差异明细表';
 
 -- 4.5 SQL 执行日志表
@@ -343,10 +359,12 @@ CREATE TABLE `sync_sql_log` (
   `oper_ip`       varchar(64)  DEFAULT NULL COMMENT '操作IP',
   `client_info`   varchar(255) DEFAULT NULL COMMENT '客户端信息',
   `create_time`   datetime     DEFAULT NULL COMMENT '操作时间',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_ds_id` (`ds_id`),
   KEY `idx_status` (`status`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_create_time` (`create_time`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SQL执行日志表';
 
 -- 4.6 SQL 工作台收藏夹
@@ -364,10 +382,12 @@ CREATE TABLE IF NOT EXISTS `sync_sql_favorite` (
   `shared`      tinyint(1)   NOT NULL DEFAULT 0 COMMENT '是否团队共享: 0=私有 1=共享',
   `create_time` datetime     DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
   `update_time` datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_user_name` (`user_name`),
   KEY `idx_ds_id` (`ds_id`),
-  KEY `idx_create_time` (`create_time`)
+  KEY `idx_create_time` (`create_time`),
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='SQL 工作台收藏夹';
 
 -- ============== 授权License表 ==============
@@ -461,7 +481,9 @@ CREATE TABLE `sync_canal_position` (
   `timestamp`   bigint(20)   DEFAULT 0 COMMENT '时间戳',
   `create_time` datetime     DEFAULT NULL,
   `update_time` datetime     DEFAULT NULL,
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
+  KEY `idx_owner` (`owner_id`)
   UNIQUE KEY `uk_task_id` (`task_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='Canal监听断点位';
 
@@ -483,11 +505,13 @@ CREATE TABLE `sync_audit_log` (
   `ip`            varchar(64)  DEFAULT NULL            COMMENT '客户端IP (兼容 nginx X-Forwarded-For)',
   `user_agent`    varchar(255) DEFAULT NULL            COMMENT '客户端 UA',
   `create_time`   datetime(3)  NOT NULL                COMMENT '创建时间 (毫秒精度)',
+  `owner_id`     bigint(20)  DEFAULT NULL COMMENT '归属用户ID(数据隔离)',
   PRIMARY KEY (`id`),
   KEY `idx_entity` (`entity_type`, `entity_id`, `create_time`) COMMENT '按实体查变更',
   KEY `idx_operator` (`operator_id`, `create_time`)         COMMENT '按人查变更',
   KEY `idx_revision` (`revision_id`)                        COMMENT '按请求分组查',
-  KEY `idx_create_time` (`create_time`)                     COMMENT '按时间范围查'
+  KEY `idx_create_time` (`create_time`)                     COMMENT '按时间范围查',
+  KEY `idx_owner` (`owner_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='审计日志表 (字段级变更追踪, 合规审计)';
 
 SET FOREIGN_KEY_CHECKS = 1;

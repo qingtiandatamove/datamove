@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import com.ruoyi.datamove.auth.OwnerContext;
 
 /**
  * 数据差异对账 + 一键修复引擎
@@ -139,7 +140,8 @@ public class DataVerifyEngine {
         final AtomicBoolean stopFlag = new AtomicBoolean(false);
         STOP_FLAGS.put(verifyId, stopFlag);
 
-        Thread t = new Thread(() -> doVerify(verifyId, task, src, tgt, plan, stopFlag), "datamove-verify-" + taskId);
+        Thread t = new Thread(OwnerContext.wrap(task.getOwnerId(), () -> doVerify(verifyId, task, src, tgt, plan, stopFlag)),
+                "datamove-verify-" + taskId);
         t.setDaemon(true);
         t.start();
         return verifyId;
@@ -198,7 +200,7 @@ public class DataVerifyEngine {
         stopFlag.set(false);
 
         log.info("[Verify] verifyId={} 启动一键修复, 待修复 {} 行", verifyId, pending);
-        Thread t = new Thread(() -> doRepair(v.getTaskId(), verifyId, src, tgt, task, stopFlag),
+        Thread t = new Thread(OwnerContext.wrap(task.getOwnerId(), () -> doRepair(v.getTaskId(), verifyId, src, tgt, task, stopFlag)),
                 "datamove-repair-" + verifyId);
         t.setDaemon(true);
         t.start();

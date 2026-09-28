@@ -63,6 +63,7 @@ public class SecurityConfig {
             .authorizeRequests()
                 .antMatchers(
                         "/auth/login",
+                        "/auth/register",
                         "/auth/captcha",
                         "/auth/logout",
                         "/auth/sms-code",

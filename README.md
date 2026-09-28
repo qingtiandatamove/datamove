@@ -41,6 +41,7 @@
 | 运行历史留痕 | 每次启动一条记录，结果/耗时/行数/速率/异常，支持趋势图 + CSV 导出 |
 | RBAC 权限体系 | 继承 RuoYi 完整用户/角色/菜单，admin 强制首次改密 |
 | 登录日志 | 每次登录留痕：**账号 / 时间 / IP / 归属地 / 浏览器 / 系统 / 登录方式**，成功与失败都记（失败记录是撞密码的线索），可按状态/方式/时间筛选，失败行淡红高亮，支持单条删除与清空 |
+| 多用户注册 + 数据隔离 | 登录页「立即注册」自助开号，**注册成功直接登录**；每个用户只看得到自己创建的数据源 / 任务 / 日志，靠 `owner_id` 自动过滤，超管看全量，详见 [docs/USER_ISOLATION.md](docs/USER_ISOLATION.md) |
 | AES 密码加密 | 数据源密码入库前 AES 加密，前端密文回显（前 2 位 + **** + 后 2 位） |
 | 轻量部署 | Spring Boot 单体 + Vue 2，单实例即可承接亿级行同步 |
 
@@ -76,6 +77,8 @@ cd ruoyi-ui && npm install && npm run dev
 打开 `http://localhost:80`，用 `admin / admin123` 登录（普通操作员）；需要用户/角色管理时用 `superadmin / admin123`。后端 API `http://localhost:8080/`，Swagger `http://localhost:8080/swagger-ui/index.html`。
 
 首次登录后请立即：1. 修改默认密码　2. 添加源库 / 目标库　3. 创建第一个同步任务。
+
+多人使用时，在登录页点「立即注册」即可自助开号（也可直接访问 `#/register`）；**每个账号的数据互相隔离**，互相看不到对方的数据源与任务。单人使用可在 `sync.register.enabled=false` 关掉注册入口。
 
 > 全新环境执行 `sql/datamove.sql` 即可，它已包含全部升级项。**老库升级**需按日期顺序执行 `sql/upgrade_*.sql` 脚本，见 [docs/DATABASE.md](docs/DATABASE.md)。
 
@@ -117,6 +120,7 @@ Docker 单实例 MySQL 8.0.41，源库与目标库同实例（单机上限，真
 | [docs/MODULES.md](docs/MODULES.md) | **核心模块详解** — 数据源 / 同步任务 / 日志 / 告警 / 校验修复 / 权限 / 审计 / 模板市场 / AI 助手 |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | 整体架构 + 目录结构 |
 | [docs/DATABASE.md](docs/DATABASE.md) | 数据库表结构 + 初始化值 + 老库升级脚本 |
+| [docs/USER_ISOLATION.md](docs/USER_ISOLATION.md) | **多用户注册 + 数据隔离** — 注册流程、owner_id 归属机制、隔离范围、升级步骤 |
 | [docs/CANAL.md](docs/CANAL.md) | 增量同步前置准备（Canal Server 配置） |
 | [docs/BENCHMARK.md](docs/BENCHMARK.md) | 10 万 / 100 万行全量同步性能实测明细 |
 | [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) | 完整效果图（16 张） |

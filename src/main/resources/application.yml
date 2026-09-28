@@ -69,6 +69,14 @@ token:
 sync:
   # 默认批次大小
   default-batch-size: 1000
+  # ----------------------------------------------------------------------------
+  # 开放注册: 用户自助注册账号 (注册后数据互相隔离, 只能看到自己创建的数据)
+  #   enabled=false → /auth/register 直接拒绝, 适合内网单人使用场景
+  #   role-key      → 注册用户默认角色, 决定他能看见哪些菜单 (common=普通用户)
+  # ----------------------------------------------------------------------------
+  register:
+    enabled: ${REGISTER_ENABLED:true}
+    role-key: ${REGISTER_ROLE_KEY:common}
   # AES加密密钥(16位, 通过环境变量 SYNC_AES_KEY 注入真实值)
   aes-key: ${SYNC_AES_KEY:CHANGE_ME_16_BYTES_KEY}
   # 钉钉告警开启

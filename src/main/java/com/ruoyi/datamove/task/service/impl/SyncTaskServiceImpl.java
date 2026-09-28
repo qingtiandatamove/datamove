@@ -41,6 +41,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
+import com.ruoyi.datamove.auth.OwnerContext;
 
 @Slf4j
 @Service
@@ -573,7 +574,8 @@ public class SyncTaskServiceImpl implements ISyncTaskService {
             throw new RuntimeException("任务「" + task.getTaskName() + "」正在运行(" + task.getStatus() + "), 本次触发忽略");
         }
         log.info("[trigger] 任务 #{}({}) 收到事件触发, 启动", task.getId(), task.getTaskName());
-        start(task.getId());
+        // 事件回调免 JWT, 没有登录态: 带上任务归属再启动, 运行历史才不会丢归属
+        OwnerContext.wrap(task.getOwnerId(), () -> start(task.getId())).run();
         return task.getId();
     }
 

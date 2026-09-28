@@ -62,6 +62,17 @@ public class AuthController {
         }
     }
 
+    @ApiOperation("注册账号 - 返回 JWT Token (注册成功直接登录)")
+    @PostMapping("/register")
+    public R<Map<String, Object>> register(@RequestBody Map<String, String> body) {
+        return R.ok(authService.register(
+                body.get("username"),
+                body.get("password"),
+                body.get("nickName"),
+                body.get("email"),
+                body.get("phonenumber")));
+    }
+
     @ApiOperation("发送短信验证码 (登录用)")
     @PostMapping("/sms-code")
     public R<Void> sendSmsCode(@RequestBody Map<String, String> body) {

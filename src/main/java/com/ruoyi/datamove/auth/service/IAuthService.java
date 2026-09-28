@@ -26,6 +26,16 @@ public interface IAuthService {
     void resetPassword(Long userId, String newPwd);
 
     /**
+     * 注册账号 (自助注册)
+     *
+     * <p>注册成功直接返回 token —— 省掉"注册完还要再登录一次"这一步。
+     * 新用户的数据与老用户完全隔离: 只能看到自己创建的数据源 / 任务 / 日志。
+     *
+     * @return 与 login() 相同的返回结构 (含 token)
+     */
+    Map<String, Object> register(String userName, String password, String nickName, String email, String phonenumber);
+
+    /**
      * 手机号 + 短信验证码登录
      *
      * @param phone 11 位手机号

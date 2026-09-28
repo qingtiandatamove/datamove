@@ -7,6 +7,8 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 
 /**
  * 同步日志 sync_task_log
@@ -15,6 +17,10 @@ import java.util.Date;
 @Data
 @TableName("sync_task_log")
 public class SyncTaskLog implements Serializable {
+
+    /** 归属用户ID: 数据隔离用, 落库时由 MetaHandlerConfig 自动填充 */
+    @TableField(value = "owner_id", fill = FieldFill.INSERT)
+    private Long ownerId;
 
     @TableId(type = IdType.AUTO)
     private Long id;

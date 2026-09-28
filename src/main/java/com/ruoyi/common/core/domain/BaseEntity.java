@@ -13,6 +13,10 @@ import java.util.Date;
 @Data
 public class BaseEntity implements Serializable {
 
+    /** 归属用户ID: 数据隔离用, 落库时由 MetaHandlerConfig 自动填充 */
+    @TableField(value = "owner_id", fill = FieldFill.INSERT)
+    private Long ownerId;
+
     @TableField(value = "create_by", fill = FieldFill.INSERT)
     private String createBy;
 

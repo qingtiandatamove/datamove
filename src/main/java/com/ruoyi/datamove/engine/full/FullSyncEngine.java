@@ -31,6 +31,7 @@ import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
+import com.ruoyi.datamove.auth.OwnerContext;
 
 /**
  * 全量同步引擎 (核心)
@@ -170,7 +171,9 @@ public class FullSyncEngine {
         final SyncContext fCtx = ctx;
         final Long fTaskId = taskId;
         final SyncTaskProgress fProgress = progress;
-        Thread t = new Thread(() -> doMainLoop(fCtx, fProgress), "datamove-task-" + fTaskId);
+        // 引擎跑在自己 new 的线程里, 没有登录态: 把任务归属带进去, 运行日志才不会落错人
+        Thread t = new Thread(OwnerContext.wrap(task.getOwnerId(), () -> doMainLoop(fCtx, fProgress)),
+                "datamove-task-" + fTaskId);
         t.setDaemon(true);
         t.start();
     }
@@ -453,10 +456,10 @@ public class FullSyncEngine {
             final String selectSql = "SELECT " + selectCols + " FROM `" + table
                     + "` WHERE `" + fSrcIdField + "` >= ? AND `" + fSrcIdField + "` <= ? AND `" + fSrcIdField
                     + "` > ?" + whereExtra(task) + " ORDER BY `" + fSrcIdField + "` ASC LIMIT " + batchSize;
-            Thread t = new Thread(() ->
+            Thread t = new Thread(OwnerContext.wrap(task.getOwnerId(), () ->
                     runShard(ctx, progress, shardNo, lo, hi, selectSql, insertSql,
                             fSrcFields, fTgtFields, fSrcIdField, batchSize,
-                            progressLock, totalRowsAll, globalMaxId, anyFailed),
+                            progressLock, totalRowsAll, globalMaxId, anyFailed)),
                     "datamove-task-" + task.getId() + "-shard" + shardNo);
             t.setDaemon(true);
             threads.add(t);

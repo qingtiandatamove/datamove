@@ -4,6 +4,18 @@ export function login (username, password) {
   return request({ url: '/auth/login', method: 'post', data: { username, password } })
 }
 
+/**
+ * 注册账号
+ * 成功后后端直接返回 token (注册即登录), 与 login() 返回结构一致
+ */
+export function register (username, password, nickName, email, phonenumber) {
+  return request({
+    url: '/auth/register',
+    method: 'post',
+    data: { username, password, nickName, email, phonenumber }
+  })
+}
+
 /** 发送短信验证码 (登录用) */
 export function sendSmsCode (phone) {
   return request({ url: '/auth/sms-code', method: 'post', data: { phone } })

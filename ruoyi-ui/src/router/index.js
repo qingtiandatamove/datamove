@@ -10,6 +10,7 @@ const PUBLIC_PATHS = ['/index', '/profile', '/login']
 
 const routes = [
   { path: '/login', component: () => import('@/views/login.vue'), meta: { title: '登录' } },
+  { path: '/register', component: () => import('@/views/register.vue'), meta: { title: '注册' } },
   {
     path: '/',
     component: () => import('@/layout/index.vue'),
@@ -41,7 +42,8 @@ const router = new VueRouter({ mode: 'hash', routes })
 router.beforeEach(async (to, from, next) => {
   document.title = (to.meta?.title ? to.meta.title + ' - ' : '') + 'DataMove 数据同步工具'
   const token = localStorage.getItem('Admin-Token')
-  if (to.path === '/login') return next()
+  // 登录页 / 注册页本身就是给未登录用户用的, 不能因为没有 token 又把它们弹回登录页
+  if (to.path === '/login' || to.path === '/register') return next()
   if (!token) return next('/login')
   // 刷新页面后 Vuex 会被重置, 但有 token 仍是登录态, 用 token 换回用户信息
   // (SQL 收藏的「编辑/删除」按钮、个人中心都依赖 state.user)

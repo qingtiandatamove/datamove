@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledFuture;
+import com.ruoyi.datamove.auth.OwnerContext;
 
 /**
  * 任务调度器: 支持 Cron 定时 / 手动 / 事件触发 三选一调度方式。
@@ -159,7 +160,8 @@ public class TaskTriggerScheduler {
                 return;
             }
             log.info("[trigger] 任务 #{}({}) 定时到点, 自动启动", taskId, db.getTaskName());
-            taskService.start(taskId);
+            // 定时到点没有登录态: 带上任务归属再启动, 否则运行历史会丢失归属
+            OwnerContext.wrap(db.getOwnerId(), () -> taskService.start(taskId)).run();
         } catch (Exception e) {
             // 单次触发失败不影响下一轮调度; 失败原因任务日志/运行历史里已有记录
             log.error("[trigger] 任务 #{} 定时启动失败: {}", taskId, e.getMessage(), e);

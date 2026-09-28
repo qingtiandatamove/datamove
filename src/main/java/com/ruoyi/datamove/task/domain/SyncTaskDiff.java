@@ -7,6 +7,8 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 
 /**
  * 数据校验差异明细 sync_task_diff
@@ -35,6 +37,10 @@ public class SyncTaskDiff implements Serializable {
     public static final String REPAIR_FAILED   = "FAILED";
     /** 修复状态: 跳过(如 EXTRA 不修复 / 明细被截断) */
     public static final String REPAIR_SKIPPED  = "SKIPPED";
+
+    /** 归属用户ID: 数据隔离用, 落库时由 MetaHandlerConfig 自动填充 */
+    @TableField(value = "owner_id", fill = FieldFill.INSERT)
+    private Long ownerId;
 
     @TableId(type = IdType.AUTO)
     private Long id;

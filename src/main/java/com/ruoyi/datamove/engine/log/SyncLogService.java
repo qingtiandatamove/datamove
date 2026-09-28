@@ -80,6 +80,8 @@ public class SyncLogService {
             l.setStatus(status);
             l.setErrorMsg(truncate(errorMsg, 2000));
             l.setContent(truncate(content, MAX_TEXT_LEN));
+            // @Async 线程池里没有登录上下文, 显式按任务归属落库
+            l.setOwnerId(ctx.getTask().getOwnerId());
             l.setCreateTime(new Date());
             logMapper.insert(l);
         } catch (Exception e) {
@@ -111,6 +113,7 @@ public class SyncLogService {
             l.setCostMs(0L);
             l.setStatus(SyncType.LOG_FAILED);
             l.setErrorMsg(truncate(errorMsg, 2000));
+            l.setOwnerId(task.getOwnerId());
             l.setCreateTime(new Date());
             logMapper.insert(l);
         } catch (Exception e) {

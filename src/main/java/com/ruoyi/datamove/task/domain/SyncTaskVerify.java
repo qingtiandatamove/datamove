@@ -7,6 +7,8 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 
 /**
  * 数据校验运行记录 sync_task_verify
@@ -21,6 +23,10 @@ import java.util.Date;
 @Data
 @TableName("sync_task_verify")
 public class SyncTaskVerify implements Serializable {
+
+    /** 归属用户ID: 数据隔离用, 落库时由 MetaHandlerConfig 自动填充 */
+    @TableField(value = "owner_id", fill = FieldFill.INSERT)
+    private Long ownerId;
 
     @TableId(type = IdType.AUTO)
     private Long id;

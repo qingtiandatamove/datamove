@@ -22,6 +22,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
+import com.ruoyi.datamove.auth.OwnerContext;
 
 /**
  * 告警中心: 负责告警的落库、投递、重试与查询
@@ -110,12 +111,12 @@ public class AlertCenterService {
                 + "本邮件由 DataMove 数据同步平台自动发送, 请勿回复。";
 
         if (needDingTalk) {
-            Long id = insert(task.getId(), task.getTaskName(), type, "DINGTALK", subject, content, webhook);
-            submit(id, () -> DingTalkUtils.sendText(webhook, content));
+            Long id = insert(task.getId(), task.getTaskName(), type, "DINGTALK", subject, content, webhook, task.getOwnerId());
+            submit(id, () -> DingTalkUtils.sendText(webhook, content), task.getOwnerId());
         }
         if (needMail) {
-            Long id = insert(task.getId(), task.getTaskName(), type, "MAIL", mailSubject, mailBody, email);
-            submit(id, () -> MailUtils.send(email, mailSubject, mailBody));
+            Long id = insert(task.getId(), task.getTaskName(), type, "MAIL", mailSubject, mailBody, email, task.getOwnerId());
+            submit(id, () -> MailUtils.send(email, mailSubject, mailBody), task.getOwnerId());
         }
     }
 
@@ -238,9 +239,10 @@ public class AlertCenterService {
     /* ==================== 内部 ==================== */
 
     private Long insert(Long taskId, String taskName, String type, String channel,
-                        String subject, String content, String target) {
+                        String subject, String content, String target, Long ownerId) {
         SyncAlertRecord r = new SyncAlertRecord();
         r.setTaskId(taskId);
+        r.setOwnerId(ownerId);   // 告警常由后台线程发出, 归属必须显式带过来
         r.setTaskName(taskName);
         r.setAlertType(type);
         r.setChannel(channel);
@@ -268,14 +270,15 @@ public class AlertCenterService {
         r.setStatus(SyncAlertRecord.STATUS_SKIPPED);
         r.setRetryCount(0);
         r.setErrorMsg(truncate(reason));
+        r.setOwnerId(task.getOwnerId());
         r.setCreateTime(new Date());
         recordMapper.insert(r);
     }
 
     /** 异步投递并按结果回写记录状态 */
-    private void submit(Long id, Supplier<Boolean> sender) {
+    private void submit(Long id, Supplier<Boolean> sender, Long ownerId) {
         try {
-            POOL.execute(() -> {
+            POOL.execute(OwnerContext.wrap(ownerId, () -> {
                 SyncAlertRecord upd = new SyncAlertRecord();
                 upd.setId(id);
                 upd.setSendTime(new Date());
@@ -289,7 +292,7 @@ public class AlertCenterService {
                     log.error("[Alert] send error, recordId={}", id, e);
                 }
                 recordMapper.updateById(upd);
-            });
+            }));
         } catch (Exception e) {
             log.error("[Alert] submit error, recordId={}", id, e);
         }

@@ -32,6 +32,7 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.util.*;
 import java.util.concurrent.*;
+import com.ruoyi.datamove.auth.OwnerContext;
 
 /**
  * Canal 增量同步引擎
@@ -132,7 +133,8 @@ public class CanalSyncEngine {
         Long runId = runService.begin(task, src, tgt);
         CanalWorker worker = new CanalWorker(task, connector, src, tgt, runId);
         WORKERS.put(taskId, worker);
-        executor.submit(worker);
+        // worker 跑在线程池里, 同样没有登录态, 归属必须显式传递
+        executor.submit(OwnerContext.wrap(task.getOwnerId(), worker));
 
         // 状态: RUNNING
         SyncTaskProgress p = progressMapper.selectOne(

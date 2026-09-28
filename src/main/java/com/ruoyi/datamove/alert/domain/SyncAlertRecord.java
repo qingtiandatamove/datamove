@@ -7,6 +7,8 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 
 /**
  * 告警发送记录 sync_alert_record
@@ -26,6 +28,10 @@ public class SyncAlertRecord implements Serializable {
     public static final String STATUS_FAILED = "2";
     /** 状态: 未发送 —— 没配通道, 或配了但通道未启用(如配了邮箱但 sync.mail.enabled=false) */
     public static final String STATUS_SKIPPED = "3";
+
+    /** 归属用户ID: 数据隔离用, 落库时由 MetaHandlerConfig 自动填充 */
+    @TableField(value = "owner_id", fill = FieldFill.INSERT)
+    private Long ownerId;
 
     @TableId(type = IdType.AUTO)
     private Long id;

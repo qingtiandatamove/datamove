@@ -7,6 +7,8 @@ import lombok.Data;
 
 import java.io.Serializable;
 import java.util.Date;
+import com.baomidou.mybatisplus.annotation.FieldFill;
+import com.baomidou.mybatisplus.annotation.TableField;
 
 /**
  * 任务断点进度 sync_task_progress
@@ -16,6 +18,10 @@ import java.util.Date;
 @Data
 @TableName("sync_task_progress")
 public class SyncTaskProgress implements Serializable {
+
+    /** 归属用户ID: 数据隔离用, 落库时由 MetaHandlerConfig 自动填充 */
+    @TableField(value = "owner_id", fill = FieldFill.INSERT)
+    private Long ownerId;
 
     @TableId(type = IdType.AUTO)
     private Long id;

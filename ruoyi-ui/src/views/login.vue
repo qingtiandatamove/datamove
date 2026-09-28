@@ -200,6 +200,11 @@
           </el-button>
         </el-form>
 
+        <p class="register-entry">
+          还没有账号？
+          <a href="javascript:;" class="register-link" @click="$router.push('/register')">立即注册</a>
+        </p>
+
         <p class="copyright">
           © 2026 DataMove ·
           <a href="javascript:;" class="footer-link">服务条款</a>
@@ -771,6 +776,21 @@ html.theme-dark .field-tip {
   background: linear-gradient(135deg, #4cabff 0%, #7e54c7 100%) !important;
 }
 .login-btn:active { transform: translateY(0) }
+
+/* ---------- 注册入口 ---------- */
+.register-entry {
+  margin: 16px 0 0;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--color-text-secondary);
+}
+.register-link {
+  color: var(--color-primary);
+  text-decoration: none;
+  font-weight: 600;
+  transition: opacity .2s;
+}
+.register-link:hover { opacity: .75; text-decoration: underline }
 
 /* ---------- 底部 ---------- */
 .copyright {
