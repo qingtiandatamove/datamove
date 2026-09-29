@@ -58,7 +58,8 @@ INSERT IGNORE INTO `sys_role` (`role_id`, `role_name`, `role_key`, `role_sort`, 
 VALUES (3, '普通用户', 'common', 3, '0', NOW());
 
 -- 菜单 + 按钮权限: 数据同步全部业务功能 (可建/改/删自己的数据源与任务),
--- 但不给「系统管理」(105) 目录、「授权管理」(sync:license:*)、「审计日志」(sync:audit:*)
+-- 但不给「系统管理」下的东西: 排除「系统管理」(105) 目录、
+-- 「授权管理」(sync:license:*)、「审计日志」(sync:audit:*)、「登录日志」(sync:loginlog:*)
 INSERT IGNORE INTO `sys_role_menu` (`role_id`, `menu_id`)
 SELECT 3, m.`menu_id`
 FROM `sys_menu` m
@@ -67,6 +68,7 @@ WHERE m.`status` = '0'
   AND (
         (m.`perms` LIKE 'sync:%'
             AND m.`perms` NOT LIKE 'sync:license:%'
-            AND m.`perms` NOT LIKE 'sync:audit:%')
+            AND m.`perms` NOT LIKE 'sync:audit:%'
+            AND m.`perms` NOT LIKE 'sync:loginlog:%')
      OR ((m.`perms` IS NULL OR m.`perms` = '') AND m.`menu_type` IN ('M', 'C'))
   );
