@@ -2,6 +2,12 @@
 
 > 基于 **RuoYi-Vue 4.8.1 最新版** 前后端分离框架开发的 MySQL 专属数据同步工具
 
+[![GitHub watchers](https://img.shields.io/github/watchers/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
+[![GitHub stars](https://img.shields.io/github/stars/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
+[![GitHub forks](https://img.shields.io/github/forks/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
+
+👉 **[访问 GitHub](https://github.com/qingtiandatamove/datamove)**
+
 **官网**: <http://8.140.200.84/website/>
 **GitHub**: <https://github.com/qingtiandatamove/datamove>
 **Gitee**: <https://gitee.com/qingtian2023/datamove>
