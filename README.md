@@ -2,16 +2,6 @@
 
 > 基于 **RuoYi-Vue 4.8.1 最新版** 前后端分离框架开发的 MySQL 专属数据同步工具
 
-[![GitHub watchers](https://img.shields.io/github/watchers/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
-[![GitHub stars](https://img.shields.io/github/stars/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
-[![GitHub forks](https://img.shields.io/github/forks/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
-
-👉 **[访问 GitHub](https://github.com/qingtiandatamove/datamove)**
-
-**官网**: <http://8.140.200.84/website/>
-**GitHub**: <https://github.com/qingtiandatamove/datamove>
-**Gitee**: <https://gitee.com/qingtian2023/datamove>
-
 ## 在线体验
 
 - **体验地址**：<http://8.140.200.84/>
@@ -23,6 +13,18 @@
 > 登录后建议先到「数据源管理」把示例数据源改成自己的库，再用「新建任务」向导跑一个同步。
 
 **一句话**：可视化零代码的 MySQL 同步工具 —— 页面点点选选就能跑任务，替代 DataX / Canal 的命令行与 JSON，自带断点续传、幂等同步、**数据校验与一键修复**。
+
+[![GitHub watchers](https://img.shields.io/github/watchers/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
+[![GitHub stars](https://img.shields.io/github/stars/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
+[![GitHub forks](https://img.shields.io/github/forks/qingtiandatamove/datamove)](https://github.com/qingtiandatamove/datamove)
+
+**官网**: <http://8.140.200.84/website/>
+
+**GitHub**: <https://github.com/qingtiandatamove/datamove>
+
+**Gitee**: <https://gitee.com/qingtian2023/datamove>
+
+👉 **[访问 GitHub](https://github.com/qingtiandatamove/datamove)**
 
 ## 项目亮点
 
