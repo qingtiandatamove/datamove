@@ -1,11 +1,21 @@
 package com.ruoyi.datamove.ai.controller;
 
 import com.ruoyi.common.core.domain.R;
+import com.ruoyi.common.security.Perms;
 import com.ruoyi.datamove.ai.AiAssistantService;
+import com.ruoyi.datamove.ai.AiDiagnoseService;
+import com.ruoyi.datamove.ai.AiMappingAdvisor;
+import com.ruoyi.datamove.ai.AiSqlService;
+import com.ruoyi.datamove.ai.domain.AiDiagnoseRequest;
+import com.ruoyi.datamove.ai.domain.AiDiagnosis;
+import com.ruoyi.datamove.ai.domain.AiMappingRequest;
+import com.ruoyi.datamove.ai.domain.AiMappingSuggestion;
 import com.ruoyi.datamove.ai.domain.AiModifyApplyRequest;
 import com.ruoyi.datamove.ai.domain.AiModifyRequest;
 import com.ruoyi.datamove.ai.domain.AiModifyResult;
 import com.ruoyi.datamove.ai.domain.AiParseResult;
+import com.ruoyi.datamove.ai.domain.AiSqlRequest;
+import com.ruoyi.datamove.ai.domain.AiSqlResult;
 import com.ruoyi.datamove.ai.domain.AiTaskDraft;
 import com.ruoyi.datamove.ai.domain.AiTextRequest;
 import io.swagger.annotations.Api;
@@ -20,6 +30,9 @@ import org.springframework.web.bind.annotation.*;
 public class AiAssistantController {
 
     private final AiAssistantService aiAssistantService;
+    private final AiMappingAdvisor aiMappingAdvisor;
+    private final AiDiagnoseService aiDiagnoseService;
+    private final AiSqlService aiSqlService;
 
     @ApiOperation("助手状态: AI 是否可用, 未配置时返回规则解析模式")
     @GetMapping("/status")
@@ -51,5 +64,36 @@ public class AiAssistantController {
     public R<AiModifyResult> applyModify(@RequestBody AiModifyApplyRequest req) {
         if (req == null || req.getTaskId() == null) throw new RuntimeException("缺少任务ID");
         return R.ok(aiAssistantService.applyModify(req.getTaskId(), req.getDraft()));
+    }
+
+    /* ==================== 字段映射推荐 ==================== */
+
+    @ApiOperation("AI 字段映射推荐: 源表与目标表字段自动配对(只建议, 不落库)")
+    @PostMapping("/mapping/suggest")
+    public R<AiMappingSuggestion> suggestMapping(@RequestBody AiMappingRequest req) {
+        Perms.require("sync:ai:mapping");
+        if (req == null) throw new RuntimeException("缺少参数");
+        return R.ok(aiMappingAdvisor.suggest(req.getSourceId(), req.getSourceTable(),
+                req.getTargetId(), req.getTargetTable()));
+    }
+
+    /* ==================== 失败任务诊断 ==================== */
+
+    @ApiOperation("AI 诊断失败任务: 结合任务配置与失败日志给出原因与修复建议(只读)")
+    @PostMapping("/diagnose")
+    public R<AiDiagnosis> diagnose(@RequestBody AiDiagnoseRequest req) {
+        Perms.require("sync:ai:diagnose");
+        if (req == null || req.getTaskId() == null) throw new RuntimeException("缺少任务ID");
+        return R.ok(aiDiagnoseService.diagnose(req.getTaskId()));
+    }
+
+    /* ==================== 自然语言生成 SQL ==================== */
+
+    @ApiOperation("自然语言生成 SQL: 只生成只读语句, 生成后需用户确认再执行")
+    @PostMapping("/sql")
+    public R<AiSqlResult> generateSql(@RequestBody AiSqlRequest req) {
+        Perms.require("sync:ai:sql");
+        if (req == null) throw new RuntimeException("缺少参数");
+        return R.ok(aiSqlService.generate(req.getDsId(), req.getQuestion(), req.getTable()));
     }
 }

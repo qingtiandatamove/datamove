@@ -172,6 +172,12 @@ export function aiApply (draft) { return request({ url: '/sync/ai/apply', method
 export function aiModify (taskId, text) { return request({ url: '/sync/ai/modify', method: 'post', data: { taskId, text }, timeout: 60000 }) }
 /* AI 修改任务: 确认应用 */
 export function aiModifyApply (taskId, draft) { return request({ url: '/sync/ai/modify/apply', method: 'post', data: { taskId, draft } }) }
+/* AI 字段映射推荐: 只给建议, 落库走 saveFieldMapping */
+export function aiSuggestMapping (data) { return request({ url: '/sync/ai/mapping/suggest', method: 'post', data, timeout: 60000 }) }
+/* AI 失败任务诊断 (只读: 不改配置不改库) */
+export function aiDiagnose (taskId) { return request({ url: '/sync/ai/diagnose', method: 'post', data: { taskId }, timeout: 60000 }) }
+/* 自然语言生成 SQL: 只生成只读语句, 生成后用户确认再执行 */
+export function aiGenerateSql (data) { return request({ url: '/sync/ai/sql', method: 'post', data, timeout: 60000 }) }
 
 /* ============ 告警中心 ============ */
 export function pageAlert (params) { return request({ url: '/sync/alert/page', method: 'get', params }) }

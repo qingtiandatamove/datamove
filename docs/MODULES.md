@@ -243,3 +243,35 @@ sync:
 - **权限**: `sync:ai:parse` 解析、`sync:ai:apply` 建/改任务，默认授予 admin；助手**不建表**，升级脚本 `sql/upgrade_20260926_ai_assistant.sql` 只加菜单与按钮权限
 - **接口**: `GET /sync/ai/status`、`POST /sync/ai/parse`、`POST /sync/ai/apply`、`POST /sync/ai/modify`、`POST /sync/ai/modify/apply`
 
+### 5.11 AI 字段映射推荐 - 源表/目标表字段自动配对
+- **解决什么**: 源表与目标表字段名不一致（驼峰 vs 下划线、改名、去前缀）时，手点几十列又慢又容易漏
+- **入口**: 「AI 配置助手」页 → **字段映射推荐** 标签
+- **怎么做的**: 把两边的**真实表结构**（字段名 / 类型 / 主键 / 注释）交给模型，输出配对 + 置信度（高/中/低）+ 依据
+- **三条硬规则**:
+  1. 模型返回的字段名**必须真实存在于两边表结构**，编造的一律丢弃 —— 宁可少推荐，也不推荐不存在的列
+  2. 本地规则匹配（同名 → 忽略大小写与下划线 → 类型大类校验）**永远跑一遍**：AI 漏的它补，AI 不可用它就是结果
+  3. **只输出建议**，点「写入任务」才走原有的替换式保存接口 `POST /sync/task/fieldMapping/save/{taskId}`
+- **权限**: `sync:ai:mapping`（超管 + 注册用户）
+- **接口**: `POST /sync/ai/mapping/suggest`，入参 `{sourceId, sourceTable, targetId, targetTable}`
+
+### 5.12 AI 失败任务诊断 - 报错日志 → 原因 + 修复建议
+- **解决什么**: 同步失败后日志几百行堆栈，新人看不出是权限、字段、类型还是并发的问题
+- **入口**: 「AI 配置助手」页 → **失败诊断** 标签（选一个任务）
+- **喂给模型的上下文**: 任务配置（类型/模式/批次/分片/限速/过滤条件）、源库与目标库信息（**不含密码**）、源表结构、最近 3 条失败日志（错误截断 800 字符）
+- **输出**: 分类（连接权限 / 表结构 / 数据冲突 / 类型不兼容 / 资源超时 / 配置问题 / 其它）+ 一句话结论 + 原因 + 2~4 条可照做的建议 + **诊断依据**（让用户知道结论怎么来的）
+- **只读**: 不碰任务配置、不改库；建议里的 SQL 只是给用户看的文本
+- **降级**: 未配 Key 时按错误关键字（Access denied / Unknown column / Duplicate entry / Data truncation / Lock wait / max_allowed_packet …）本地诊断
+- **权限**: `sync:ai:diagnose`（超管 + 注册用户）
+- **接口**: `POST /sync/ai/diagnose`，入参 `{taskId}`
+
+### 5.13 AI 生成 SQL - 中文描述 → 只读 SQL
+- **解决什么**: SQL 工作台里要查点东西，得先翻表结构再手写
+- **入口**: 「AI 配置助手」页 → **生成 SQL** 标签；生成后可一键复制，到 SQL 工作台粘贴执行
+- **Token 控制**: 描述里提到表名就只喂那张表；否则最多喂 10 张表的结构，其余只给表名
+- **安全边界（AI 不享受特权）**:
+  1. 生成完必须过 `ProtectedTable.checkStatement`：碰系统表（`sys_` / `sync_` 前缀）直接拒
+  2. 首词白名单：只放行 `SELECT / SHOW / DESC / EXPLAIN / WITH`
+  3. 只生成**不执行**，用户看过再点执行；无 LIMIT 会提示风险
+- **权限**: `sync:ai:sql`（超管 + 注册用户）
+- **接口**: `POST /sync/ai/sql`，入参 `{dsId, question, table?}`
+
